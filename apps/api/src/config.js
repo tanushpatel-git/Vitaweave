@@ -22,5 +22,8 @@ module.exports = {
     aiServiceApiKey:
       process.env.AI_SERVICE_API_KEY || process.env.API_KEY_FOR_AI || "dev-ai-key",
     uploadDir: process.env.UPLOAD_DIR || "./uploads",
+    mistralApiKey: process.env.MISTRAL_API_KEY || "",
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",
+    ollamaModel: process.env.OLLAMA_MODEL || "llama3.2:latest",
   },
 };

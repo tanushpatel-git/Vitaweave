@@ -246,6 +246,10 @@ const reportSchema = new Schema(
     summary: { type: String, default: null },
     extracted_points: { type: [String], default: [] },
     extraction_source: { type: String, default: null },
+    ocr_text: { type: String, default: null },
+    extracted_data: { type: Schema.Types.Mixed, default: null },
+    extraction_status: { type: String, enum: ["pending", "completed", "needs_review", "failed"], default: "pending" },
+    extraction_error: { type: String, default: null },
     flagged_findings: { type: [String], default: [] },
   },
   { timestamps: true }

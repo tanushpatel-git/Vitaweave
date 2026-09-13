@@ -203,7 +203,8 @@ async function getPatientClinicalSummary(req, res) {
       chronic_conditions: patient.chronic_conditions || [],
       active_medications: medications.slice(0, 3).map((medication) => ({ name: medication.name, dosage: medication.dosage, duration: medication.duration })),
       recent_reports: reports.map((report) => ({ title: report.title, type: report.type, date: report.date })),
-      prescription_insights: reports.filter((report) => report.type === "Prescription").slice(0, 2).map((report) => ({ title: report.title, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Prescription uploaded — document review needed."]).slice(0, 3), source: report.extraction_source || "upload metadata only" })),
+      prescription_insights: reports.filter((report) => report.type === "Prescription").slice(0, 2).map((report) => ({ title: report.title, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Prescription uploaded — document review needed."]).slice(0, 3), source: report.extraction_source || "upload metadata only", status: report.extraction_status || "needs_review" })),
+      report_insights: reports.filter((report) => report.type !== "Prescription").slice(0, 2).map((report) => ({ title: report.title, type: report.type, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Report uploaded — document review needed."]).slice(0, 3), status: report.extraction_status || "needs_review" })),
       clinical_note: "This overview is generated from Smart Case History consultations, documented case sheets, medicines, and reports. It supports—not replaces—clinical judgement.",
     },
   });

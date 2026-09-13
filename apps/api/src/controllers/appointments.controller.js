@@ -1,5 +1,6 @@
 const { Appointment, Patient, Hospital, Doctor, Report, AuditLog } = require("../models/schemas");
 const { AppError } = require("../utils/async");
+const { config } = require("../config");
 
 function patientDetails(patient) {
   return {
@@ -125,11 +126,25 @@ async function uploadHospitalPatientReport(req, res) {
   if (!req.file) throw new AppError("Report file is required", 400);
   if (!req.body.title?.trim()) throw new AppError("Report title is required", 400);
 
+  let extraction = { ocrText: null, data: null, points: extractPrescriptionPoints(req.body.title.trim(), req.body.summary?.trim()), status: "failed", error: null };
+  try {
+    const { extractMedicalDocumentFromFile } = await import("../services/prescriptionExtraction.mjs");
+    const result = await extractMedicalDocumentFromFile(req.file, config.ollamaBaseUrl, config.ollamaModel, req.body.type || "clinical report");
+    extraction = { ...result, error: null };
+  } catch (error) {
+    extraction.error = error instanceof Error ? error.message.slice(0, 500) : "Report extraction failed.";
+  }
   const report = await Report.create({
     patient_id: patient._id,
     type: req.body.type || "Other",
     title: req.body.title.trim(),
     summary: req.body.summary?.trim() || null,
+    extracted_points: extraction.points,
+    extraction_source: extraction.status === "failed" ? "upload metadata only" : "Local Ollama vision extraction",
+    ocr_text: extraction.ocrText,
+    extracted_data: extraction.data,
+    extraction_status: extraction.status,
+    extraction_error: extraction.error,
     date: new Date(),
     file_url: `/uploads/reports/${req.file.filename}`,
     uploaded_by: req.user.id,
@@ -143,15 +158,26 @@ async function uploadMyPrescription(req, res) {
   if (!patient) throw new AppError("Patient profile not found", 404);
   if (!req.file) throw new AppError("Prescription file is required", 400);
   if (!req.body.title?.trim()) throw new AppError("Prescription title is required", 400);
-  if (!req.body.summary?.trim()) throw new AppError("Enter the key medicines, doses, duration, or instructions so they can be summarized for the doctor", 400);
   const prescriptionSummary = req.body.summary?.trim() || null;
+  let extraction = { ocrText: null, data: null, points: extractPrescriptionPoints(req.body.title.trim(), prescriptionSummary), status: "failed", error: null };
+  try {
+    const { extractMedicalDocumentFromFile } = await import("../services/prescriptionExtraction.mjs");
+    const result = await extractMedicalDocumentFromFile(req.file, config.ollamaBaseUrl, config.ollamaModel, "prescription");
+    extraction = { ...result, error: null };
+  } catch (error) {
+    extraction.error = error instanceof Error ? error.message.slice(0, 500) : "Prescription extraction failed.";
+  }
   const report = await Report.create({
     patient_id: patient._id,
     type: "Prescription",
     title: req.body.title.trim(),
     summary: prescriptionSummary,
-    extracted_points: extractPrescriptionPoints(req.body.title.trim(), prescriptionSummary),
-    extraction_source: prescriptionSummary ? "patient-entered prescription details" : "upload metadata only",
+    extracted_points: extraction.points,
+    extraction_source: extraction.status === "failed" ? (prescriptionSummary ? "patient-entered details" : "upload metadata only") : "Local Ollama vision extraction",
+    ocr_text: extraction.ocrText,
+    extracted_data: extraction.data,
+    extraction_status: extraction.status,
+    extraction_error: extraction.error,
     date: new Date(),
     file_url: `/uploads/reports/${req.file.filename}`,
     uploaded_by: req.user.id,

@@ -131,7 +131,8 @@ export interface PatientClinicalSummary {
   chronic_conditions: string[];
   active_medications: Array<{ name: string; dosage: string; duration?: string | null }>;
   recent_reports: Array<{ title: string; type: string; date: string }>;
-  prescription_insights: Array<{ title: string; date: string; points: string[]; source: string }>;
+  prescription_insights: Array<{ title: string; date: string; points: string[]; source: string; status: "completed" | "needs_review" | "failed" | "pending" }>;
+  report_insights: Array<{ title: string; type: string; date: string; points: string[]; status: "completed" | "needs_review" | "failed" | "pending" }>;
   clinical_note: string;
 }
 
