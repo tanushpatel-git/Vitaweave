@@ -13,6 +13,10 @@
  * Mongoose pluralized names in apps/api (users, doctors, patients,
  * aiconfigs, conversations, messages, doctordocuments).
  */
+const dns = require("dns");
+const config=require('../../apps/api/src/config.js')
+const mongoose=require('mongoose')
+const connectDb=require('../../apps/api/src/db.js')
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
@@ -32,7 +36,12 @@ function loadEnv() {
     }
   }
 }
-
+// async function connectDb() {
+//   dns.setServers(["8.8.8.8", "1.1.1.1"]);
+//   await mongoose.connect(config.mongoUri, {
+//     dbName: config.mongoDbName,
+//   });
+// }
 async function upsertUser(db, { email, full_name, role, password }) {
   const hash = await bcrypt.hash(password, 10);
   const now = new Date();
@@ -61,6 +70,7 @@ async function main() {
     process.env.MONGODB_URI || "mongodb://localhost:27017/medchat";
   const dbname = process.env.MONGODB_DB || "medchat";
 
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
   const client = new MongoClient(uri);
   await client.connect();
   const db = client.db(dbname);

@@ -2,6 +2,7 @@ const { Router } = require("express");
 const {
   searchPatients,
   getPatientProfile,
+  getPatientClinicalSummary,
   getPatientTimeline,
   createConsultation,
   saveCaseSheet,
@@ -13,7 +14,7 @@ const {
   transcribeAudioFile,
 } = require("../controllers/caseHistory.controller");
 const { asyncHandler } = require("../utils/async");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireRole } = require("../middleware/auth");
 const multer = require("multer");
 
 const router = Router();
@@ -27,6 +28,7 @@ router.get("/patients/search", requireAuth, asyncHandler(searchPatients));
 
 // Patient profile & emergency dataset
 router.get("/patients/:id/profile", requireAuth, asyncHandler(getPatientProfile));
+router.get("/patients/:id/clinical-summary", requireAuth, requireRole("DOCTOR"), asyncHandler(getPatientClinicalSummary));
 router.get("/patients/:id/timeline", requireAuth, asyncHandler(getPatientTimeline));
 router.get("/patients/:id/emergency", requireAuth, asyncHandler(getEmergencyDataset));
 

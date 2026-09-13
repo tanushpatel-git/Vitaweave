@@ -1,4 +1,4 @@
-const { Conversation, Message, Doctor, Patient, AiConfig } = require("../models/schemas");
+const { Conversation, Message, Doctor, Patient, Medication, AiConfig } = require("../models/schemas");
 const { AppError } = require("../utils/async");
 const { queryAiService } = require("../services/aiClient");
 
@@ -159,6 +159,53 @@ async function sendMessage(req, res) {
   });
 }
 
+/** A live, doctor-facing aggregation of all conversations for one patient. */
+async function getPatientConversationSummary(req, res) {
+  const doctor = await requireDoctor(req.user.id);
+  const patient = await Patient.findById(req.params.patientId).populate("user_id", "full_name email").lean();
+  if (!patient) throw new AppError("Patient not found", 404);
+
+  const conversations = await Conversation.find({ patient_id: patient._id })
+    .sort({ updatedAt: -1 })
+    .lean();
+  if (!conversations.length) throw new AppError("No conversations found for this patient", 404);
+
+  const conversationIds = conversations.map((conversation) => conversation._id);
+  const [messages, activeMedications] = await Promise.all([
+    Message.find({ conversation_id: { $in: conversationIds } }).sort({ createdAt: -1 }).lean(),
+    Medication.find({ patient_id: patient._id, active: true }).sort({ start_date: -1 }).lean(),
+  ]);
+  const patientMessages = messages.filter((message) => message.sender === "patient");
+  const recentConcerns = patientMessages.slice(0, 5).map((message) => ({
+    text: String(message.content || "").replace(/\s+/g, " ").trim().slice(0, 280),
+    timestamp: message.createdAt,
+  })).filter((message) => message.text);
+  const latestConcern = recentConcerns[0]?.text || "No patient-reported concern has been recorded yet.";
+  const latestActivity = messages[0]?.createdAt || conversations[0]?.updatedAt;
+
+  res.json({
+    summary: {
+      patient: {
+        id: String(patient._id),
+        full_name: patient.user_id?.full_name || "Patient",
+        custom_id: patient.custom_id || `PAT-${String(patient._id).slice(-4).toUpperCase()}`,
+        dob: patient.dob, sex: patient.sex, blood_type: patient.blood_type,
+      },
+      conversation_count: conversations.length,
+      message_count: messages.length,
+      latest_activity: latestActivity,
+      latest_patient_update: latestConcern,
+      recent_concerns: recentConcerns,
+      known_allergies: patient.known_allergies || [],
+      chronic_conditions: patient.chronic_conditions || [],
+      active_medications: activeMedications.map((medication) => ({
+        name: medication.name, dosage: medication.dosage, duration: medication.duration,
+      })),
+      clinical_note: "This live overview aggregates documented conversation content and health records. It supports clinical review and is not a diagnosis.",
+    },
+  });
+}
+
 async function requirePatient(userId) {
   const patient = await Patient.findOne({ user_id: userId });
   if (!patient) throw new AppError("Patient profile not found", 404);
@@ -191,4 +238,4 @@ async function assertConversationAccess(user, conversationId) {
   return conv;
 }
 
-module.exports = { listMyConversations, listDoctorConversations, getConversation, createConversation, sendMessage };
+module.exports = { listMyConversations, listDoctorConversations, getConversation, createConversation, sendMessage, getPatientConversationSummary };

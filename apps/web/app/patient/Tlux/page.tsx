@@ -23,7 +23,7 @@ import {
   X,
   LucideIcon,
 } from "lucide-react";
-import { api, ApiError } from "../../../lib/api";
+import { api, ApiError, getStoredUser } from "../../../lib/api";
 
 type View = "consultations" | "specialties" | "doctors" | "chat";
 
@@ -113,27 +113,15 @@ function initialsFor(name: string): string {
     .join("");
 }
 
-const historyGroups = [
-  {
-    label: "TODAY",
-    chats: ["Cardiovascular assessment"],
-  },
-  {
-    label: "YESTERDAY",
-    chats: ["Neurological assessment", "Sleep concern"],
-  },
-  {
-    label: "SEP 06",
-    chats: ["Annual health review"],
-  },
-];
-
 function uniqueLocalId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 export default function Page() {
   const router = useRouter();
+  const patientUser = getStoredUser();
+  const patientName = patientUser?.full_name || "Patient";
+  const patientInitials = patientName.trim().split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "PT";
   const [view, setView] = useState<View>("consultations");
   const [selectedSpecialty, setSelectedSpecialty] = useState("Cardiology");
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
@@ -490,43 +478,15 @@ export default function Page() {
             <ArrowRight size={15} />
           </button>
 
-          <div className="space-y-7">
-            {historyGroups.map((group) => (
-              <div key={group.label}>
-                <p className="mb-2 px-2 text-[9px] font-semibold tracking-[0.18em] text-[#929a96]">
-                  {group.label}
-                </p>
-
-                <div className="space-y-1">
-                  {group.chats.map((chat, index) => (
-                    <button
-                      key={chat}
-                      onClick={() => {
-                        if (index === 0 && group.label === "TODAY") {
-                          const first = consultations[0];
-                          if (first) openConsultation(first);
-                        }
-                      }}
-                      className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[12px] transition ${
-                        chat === "Cardiovascular assessment" &&
-                        view === "chat"
-                          ? "bg-white shadow-[0_4px_20px_rgba(20,30,25,0.05)]"
-                          : "hover:bg-white/70"
-                      }`}
-                    >
-                      <MessageCircle
-                        size={14}
-                        className="shrink-0 text-[#8c9691]"
-                      />
-
-                      <span className="truncate text-[#4d5651]">
-                        {chat}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+          <div className="space-y-2">
+            <p className="mb-2 px-2 text-[9px] font-semibold tracking-[0.18em] text-[#929a96]">SAVED CONVERSATIONS</p>
+            {loadingConsultations ? <p className="px-2 text-xs text-[#929a96]">Loading…</p> : consultations.length ? consultations.map((consultation) => (
+              <button key={consultation.id} onClick={() => openConsultation(consultation)} className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[12px] transition ${activeConsultation?.id === consultation.id && view === "chat" ? "bg-white shadow-[0_4px_20px_rgba(20,30,25,0.05)]" : "hover:bg-white/70"}`}>
+                <MessageCircle size={14} className="shrink-0 text-[#8c9691]"/>
+                <span className="min-w-0 flex-1 truncate text-[#4d5651]">{consultation.title}</span>
+                <span className="text-[9px] text-[#9aa39f]">{consultation.time}</span>
+              </button>
+            )) : <p className="px-2 text-xs leading-5 text-[#929a96]">No saved conversations yet. Start a consultation to create one.</p>}
           </div>
 
           <div className="mt-auto space-y-1">
@@ -608,7 +568,7 @@ export default function Page() {
               </div>
 
               <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#e1e6e3] bg-white text-xs font-semibold">
-                VG
+                {patientInitials}
               </div>
             </div>
           </header>
@@ -1142,6 +1102,9 @@ function ChatView({
 }) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const hasScrolled = useRef(false);
+  const patientUser = getStoredUser();
+  const patientName = patientUser?.full_name || "Patient";
+  const patientInitials = initialsFor(patientName);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1353,11 +1316,11 @@ function ChatView({
 
             <div className="mt-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e5f0ec] text-xs font-semibold text-[#5e8075]">
-                VG
+                {patientInitials}
               </div>
 
               <div>
-                <p className="text-sm font-semibold">Vedant Gupta</p>
+                <p className="text-sm font-semibold">{patientName}</p>
                 <p className="text-[10px] text-[#929a96]">
                   Patient profile
                 </p>

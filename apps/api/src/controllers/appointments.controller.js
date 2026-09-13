@@ -1,4 +1,4 @@
-const { Appointment, Patient, Hospital, Report, AuditLog } = require("../models/schemas");
+const { Appointment, Patient, Hospital, Doctor, Report, AuditLog } = require("../models/schemas");
 const { AppError } = require("../utils/async");
 
 function patientDetails(patient) {
@@ -10,16 +10,94 @@ function patientDetails(patient) {
   };
 }
 
+function extractPrescriptionPoints(title, summary) {
+  const text = `${title || ""}\n${summary || ""}`.replace(/\s+/g, " ").trim();
+  if (!summary?.trim()) return ["Prescription uploaded — review the attached document for medicine and dose details."];
+  const points = text.split(/(?:\.|;|\n|•|\||\s+-\s+)/).map((item) => item.trim()).filter((item) => item.length > 3).slice(0, 3);
+  return points.length ? points : ["Prescription details were provided by the patient."];
+}
+
 async function createAppointment(req, res) {
   const patient = await Patient.findOne({ user_id: req.user.id });
   if (!patient) throw new AppError("Patient profile not found", 404);
-  const { scheduled_for, department, reason, hospital_id } = req.body;
+  const { scheduled_for, department, reason, hospital_id, doctor_id } = req.body;
   if (!scheduled_for || Number.isNaN(new Date(scheduled_for).getTime())) throw new AppError("A valid appointment date and time is required", 400);
+  if (new Date(scheduled_for).getTime() <= Date.now()) throw new AppError("Appointments must be scheduled for a future date and time", 400);
   const hospital = hospital_id ? await Hospital.findById(hospital_id) : await Hospital.findOne({ code: "VITA-CGH-001" });
   if (!hospital) throw new AppError("Hospital not found", 404);
-  const appointment = await Appointment.create({ patient_id: patient._id, hospital_id: hospital._id, scheduled_for: new Date(scheduled_for), department: department || "General Medicine", reason: reason || null, status: "requested" });
+  const doctor = doctor_id ? await Doctor.findById(doctor_id) : null;
+  if (doctor_id && !doctor) throw new AppError("Selected doctor was not found", 404);
+  const appointment = await Appointment.create({ patient_id: patient._id, hospital_id: hospital._id, doctor_id: doctor?._id || null, scheduled_for: new Date(scheduled_for), department: department || doctor?.specialty || "General Medicine", reason: reason || null, status: "requested" });
   await AuditLog.create({ user_id: req.user.id, action: "APPOINTMENT_REQUESTED", entity: "APPOINTMENT", entity_id: String(appointment._id) });
   res.status(201).json({ appointment });
+}
+
+function appointmentDetails(appointment) {
+  return {
+    _id: String(appointment._id), scheduled_for: appointment.scheduled_for, department: appointment.department,
+    reason: appointment.reason, status: appointment.status,
+    hospital: appointment.hospital_id ? { id: String(appointment.hospital_id._id || appointment.hospital_id), name: appointment.hospital_id.name || "Hospital" } : null,
+    doctor: appointment.doctor_id ? { id: String(appointment.doctor_id._id || appointment.doctor_id), full_name: appointment.doctor_id.user_id?.full_name || "Doctor", specialty: appointment.doctor_id.specialty || null } : null,
+  };
+}
+
+async function listAppointmentOptions(_req, res) {
+  const [hospitals, doctors] = await Promise.all([
+    Hospital.find().sort({ name: 1 }).lean(),
+    Doctor.find().populate("user_id", "full_name is_active").lean(),
+  ]);
+  res.json({
+    hospitals: hospitals.map((hospital) => ({ id: String(hospital._id), name: hospital.name, location: hospital.location?.city || hospital.location?.address || "" })),
+    doctors: doctors.filter((doctor) => doctor.user_id?.is_active !== false).map((doctor) => ({ id: String(doctor._id), full_name: doctor.user_id?.full_name || "Doctor", specialty: doctor.specialty || null })),
+  });
+}
+
+async function listMyAppointments(req, res) {
+  const patient = await Patient.findOne({ user_id: req.user.id });
+  if (!patient) throw new AppError("Patient profile not found", 404);
+  const appointments = await Appointment.find({ patient_id: patient._id }).sort({ scheduled_for: 1 }).populate("hospital_id", "name location").populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).lean();
+  res.json({ appointments: appointments.map(appointmentDetails) });
+}
+
+async function updateMyAppointment(req, res) {
+  const patient = await Patient.findOne({ user_id: req.user.id });
+  if (!patient) throw new AppError("Patient profile not found", 404);
+  const appointment = await Appointment.findOne({ _id: req.params.id, patient_id: patient._id });
+  if (!appointment) throw new AppError("Appointment not found", 404);
+  const { action, scheduled_for, department, reason, doctor_id } = req.body;
+  if (action === "cancel") {
+    if (["completed", "cancelled"].includes(appointment.status)) throw new AppError("This appointment cannot be cancelled", 400);
+    appointment.status = "cancelled";
+  } else if (action === "reschedule") {
+    if (appointment.status !== "requested") throw new AppError("Only requested appointments can be rescheduled", 400);
+    if (!scheduled_for || Number.isNaN(new Date(scheduled_for).getTime()) || new Date(scheduled_for).getTime() <= Date.now()) throw new AppError("Choose a future date and time", 400);
+    if (doctor_id) { const doctor = await Doctor.findById(doctor_id); if (!doctor) throw new AppError("Selected doctor was not found", 404); appointment.doctor_id = doctor._id; }
+    appointment.scheduled_for = new Date(scheduled_for); appointment.department = department || appointment.department; appointment.reason = reason?.trim() || null;
+  } else throw new AppError("Unsupported appointment action", 400);
+  await appointment.save();
+  await AuditLog.create({ user_id: req.user.id, action: action === "cancel" ? "APPOINTMENT_CANCELLED" : "APPOINTMENT_RESCHEDULED", entity: "APPOINTMENT", entity_id: String(appointment._id) });
+  const populated = await Appointment.findById(appointment._id).populate("hospital_id", "name location").populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).lean();
+  res.json({ appointment: appointmentDetails(populated) });
+}
+
+async function listHospitalAppointments(req, res) {
+  const hospital = await Hospital.findOne({ user_id: req.user.id });
+  if (!hospital) throw new AppError("Hospital profile not found", 404);
+  const appointments = await Appointment.find({ hospital_id: hospital._id }).sort({ scheduled_for: 1 }).populate({ path: "patient_id", populate: { path: "user_id", select: "full_name" } }).populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).lean();
+  res.json({ appointments: appointments.map((appointment) => ({ ...appointmentDetails(appointment), patient: appointment.patient_id ? { id: String(appointment.patient_id._id), custom_id: appointment.patient_id.custom_id, full_name: appointment.patient_id.user_id?.full_name || "Patient" } : null })) });
+}
+
+async function updateHospitalAppointment(req, res) {
+  const hospital = await Hospital.findOne({ user_id: req.user.id });
+  if (!hospital) throw new AppError("Hospital profile not found", 404);
+  const appointment = await Appointment.findOne({ _id: req.params.id, hospital_id: hospital._id });
+  if (!appointment) throw new AppError("Appointment not found", 404);
+  const { status } = req.body;
+  if (!['confirmed', 'completed', 'cancelled'].includes(status)) throw new AppError("Invalid appointment status", 400);
+  if (appointment.status === 'cancelled' || appointment.status === 'completed') throw new AppError("This appointment is already closed", 400);
+  appointment.status = status; await appointment.save();
+  await AuditLog.create({ user_id: req.user.id, action: `APPOINTMENT_${status.toUpperCase()}`, entity: "APPOINTMENT", entity_id: String(appointment._id) });
+  res.json({ appointment: appointmentDetails(appointment) });
 }
 
 async function getHospitalPatientAppointment(req, res) {
@@ -65,11 +143,15 @@ async function uploadMyPrescription(req, res) {
   if (!patient) throw new AppError("Patient profile not found", 404);
   if (!req.file) throw new AppError("Prescription file is required", 400);
   if (!req.body.title?.trim()) throw new AppError("Prescription title is required", 400);
+  if (!req.body.summary?.trim()) throw new AppError("Enter the key medicines, doses, duration, or instructions so they can be summarized for the doctor", 400);
+  const prescriptionSummary = req.body.summary?.trim() || null;
   const report = await Report.create({
     patient_id: patient._id,
     type: "Prescription",
     title: req.body.title.trim(),
-    summary: req.body.summary?.trim() || null,
+    summary: prescriptionSummary,
+    extracted_points: extractPrescriptionPoints(req.body.title.trim(), prescriptionSummary),
+    extraction_source: prescriptionSummary ? "patient-entered prescription details" : "upload metadata only",
     date: new Date(),
     file_url: `/uploads/reports/${req.file.filename}`,
     uploaded_by: req.user.id,
@@ -78,4 +160,4 @@ async function uploadMyPrescription(req, res) {
   res.status(201).json({ report });
 }
 
-module.exports = { createAppointment, getHospitalPatientAppointment, uploadHospitalPatientReport, uploadMyPrescription };
+module.exports = { createAppointment, listAppointmentOptions, listMyAppointments, updateMyAppointment, listHospitalAppointments, updateHospitalAppointment, getHospitalPatientAppointment, uploadHospitalPatientReport, uploadMyPrescription };

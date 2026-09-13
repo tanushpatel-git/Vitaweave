@@ -21,6 +21,11 @@ const navigation = [
     icon: Stethoscope,
   },
   {
+    id: "patient-summary",
+    label: "Patient summaries",
+    icon: Brain,
+  },
+  {
     id: "conversations",
     label: "Conversations",
     icon: MessageSquare,

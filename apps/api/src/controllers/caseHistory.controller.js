@@ -167,6 +167,48 @@ async function getPatientProfile(req, res) {
   });
 }
 
+// Clinical overview sourced from Smart Case History consultations and records.
+async function getPatientClinicalSummary(req, res) {
+  const doctor = await Doctor.findOne({ user_id: req.user.id });
+  if (!doctor) throw new AppError("Doctor profile required", 403);
+  const { id } = req.params;
+  const patient = await Patient.findById(id).populate("user_id", "full_name email").lean();
+  if (!patient) throw new AppError("Patient not found", 404);
+
+  const [consultations, caseSheets, medications, reports] = await Promise.all([
+    Consultation.find({ patient_id: id }).populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).sort({ date: -1 }).lean(),
+    CaseSheet.find({ patient_id: id }).sort({ reviewed_at: -1, createdAt: -1 }).lean(),
+    Medication.find({ patient_id: id, active: true }).sort({ start_date: -1 }).lean(),
+    Report.find({ patient_id: id }).sort({ date: -1 }).limit(5).lean(),
+  ]);
+  const caseSheetByConsultation = new Map(caseSheets.map((sheet) => [String(sheet.consultation_id), sheet]));
+  const orderedSheets = consultations.map((consultation) => caseSheetByConsultation.get(String(consultation._id))).filter(Boolean);
+  const unique = (items) => [...new Set(items.filter(Boolean))];
+  const latestSheet = orderedSheets[0] || caseSheets[0] || null;
+  const symptoms = unique(caseSheets.flatMap((sheet) => sheet.symptoms || [])).slice(0, 12);
+  const diagnoses = unique(caseSheets.map((sheet) => sheet.diagnosis)).slice(0, 6);
+  const latestConsultation = consultations[0];
+
+  res.json({
+    summary: {
+      patient: { id: String(patient._id), full_name: patient.user_id?.full_name || "Patient", custom_id: patient.custom_id || `PAT-${String(patient._id).slice(-4).toUpperCase()}`, dob: patient.dob, sex: patient.sex, blood_type: patient.blood_type },
+      consultation_count: consultations.length,
+      report_count: reports.length,
+      latest_activity: latestConsultation?.date || latestSheet?.reviewed_at || patient.updatedAt,
+      current_assessment: latestSheet?.diagnosis || "No finalized diagnosis recorded yet.",
+      reported_symptoms: symptoms,
+      recent_diagnoses: diagnoses,
+      latest_advice: latestSheet?.doctors_advice || [],
+      known_allergies: patient.known_allergies || [],
+      chronic_conditions: patient.chronic_conditions || [],
+      active_medications: medications.slice(0, 3).map((medication) => ({ name: medication.name, dosage: medication.dosage, duration: medication.duration })),
+      recent_reports: reports.map((report) => ({ title: report.title, type: report.type, date: report.date })),
+      prescription_insights: reports.filter((report) => report.type === "Prescription").slice(0, 2).map((report) => ({ title: report.title, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Prescription uploaded — document review needed."]).slice(0, 3), source: report.extraction_source || "upload metadata only" })),
+      clinical_note: "This overview is generated from Smart Case History consultations, documented case sheets, medicines, and reports. It supports—not replaces—clinical judgement.",
+    },
+  });
+}
+
 // 3. Consolidated Digital Patient Case Timeline
 async function getPatientTimeline(req, res) {
   const { id } = req.params;
@@ -664,6 +706,7 @@ async function transcribeAudioFile(req, res) {
 module.exports = {
   searchPatients,
   getPatientProfile,
+  getPatientClinicalSummary,
   getPatientTimeline,
   createConsultation,
   saveCaseSheet,

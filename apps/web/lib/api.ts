@@ -105,6 +105,36 @@ export interface Message {
   created_at: string;
 }
 
+export interface PatientConversationSummary {
+  patient: { id: string; full_name: string; custom_id: string; dob: string | null; sex: string | null; blood_type: string | null };
+  conversation_count: number;
+  message_count: number;
+  latest_activity?: string;
+  latest_patient_update: string;
+  recent_concerns: Array<{ text: string; timestamp: string }>;
+  known_allergies: string[];
+  chronic_conditions: string[];
+  active_medications: Array<{ name: string; dosage: string; duration?: string | null }>;
+  clinical_note: string;
+}
+
+export interface PatientClinicalSummary {
+  patient: { id: string; full_name: string; custom_id: string; dob: string | null; sex: string | null; blood_type: string | null };
+  consultation_count: number;
+  report_count: number;
+  latest_activity?: string;
+  current_assessment: string;
+  reported_symptoms: string[];
+  recent_diagnoses: string[];
+  latest_advice: string[];
+  known_allergies: string[];
+  chronic_conditions: string[];
+  active_medications: Array<{ name: string; dosage: string; duration?: string | null }>;
+  recent_reports: Array<{ title: string; type: string; date: string }>;
+  prescription_insights: Array<{ title: string; date: string; points: string[]; source: string }>;
+  clinical_note: string;
+}
+
 export interface DocumentRow {
   id: string;
   title: string;
@@ -204,7 +234,19 @@ export const api = {
     return request<{ report: Record<string, unknown> }>(`/api/appointments/hospital/patient/${encodeURIComponent(patientId)}/report`, { method: "POST", body });
   },
 
-  createAppointment: (payload: { scheduled_for: string; department?: string; reason?: string; hospital_id?: string }) =>
+  getAppointmentOptions: () => request<{ hospitals: AppointmentHospital[]; doctors: AppointmentDoctor[] }>("/api/appointments/options"),
+
+  getMyAppointments: () => request<{ appointments: HospitalAppointment[] }>("/api/appointments/mine"),
+
+  updateMyAppointment: (id: string, payload: { action: "cancel" | "reschedule"; scheduled_for?: string; department?: string; reason?: string; doctor_id?: string }) =>
+    request<{ appointment: HospitalAppointment }>(`/api/appointments/mine/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+
+  getHospitalAppointments: () => request<{ appointments: HospitalAppointment[] }>("/api/appointments/hospital"),
+
+  updateHospitalAppointment: (id: string, status: "confirmed" | "completed" | "cancelled") =>
+    request<{ appointment: HospitalAppointment }>(`/api/appointments/hospital/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  createAppointment: (payload: { scheduled_for: string; department?: string; reason?: string; hospital_id?: string; doctor_id?: string }) =>
     request<{ appointment: HospitalAppointment }>("/api/appointments", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -227,6 +269,12 @@ export const api = {
     request<{ conversation: Conversation; messages: Message[] }>(
       `/api/conversations/${id}`
     ),
+
+  getPatientConversationSummary: (patientId: string) =>
+    request<{ summary: PatientConversationSummary }>(`/api/conversations/doctor/patients/${patientId}/summary`),
+
+  getPatientClinicalSummary: (patientId: string) =>
+    request<{ summary: PatientClinicalSummary }>(`/api/case-history/patients/${patientId}/clinical-summary`),
 
   createConversation: (doctorId: string, title?: string) =>
     request<{ conversation: Conversation }>("/api/conversations", {
@@ -422,7 +470,13 @@ export interface HospitalAppointment {
   department: string;
   reason: string | null;
   status: "requested" | "confirmed" | "completed" | "cancelled";
+  hospital?: AppointmentHospital | null;
+  doctor?: AppointmentDoctor | null;
+  patient?: { id: string; custom_id: string; full_name: string } | null;
 }
+
+export interface AppointmentHospital { id: string; name: string; location?: string; }
+export interface AppointmentDoctor { id: string; full_name: string; specialty: string | null; }
 
 export interface CaseSheet {
   _id?: string;

@@ -5,6 +5,7 @@ import { ArrowLeft, FileText, Save, ChevronDown, Upload, Trash2, Send } from "lu
 import DoctorSidebar from "./components/DoctorSidebar";
 import DoctorTopBar from "./components/DoctorTopBar";
 import SmartCaseHistoryView from "./components/SmartCaseHistoryView";
+import PatientClinicalSummaryPage from "./components/PatientClinicalSummary";
 import { api, ApiError, type DocumentRow, type Conversation, type Message, type AiConfig } from "../../../lib/api";
 
 const ACCEPTED = ".txt,.md,.csv,.json";
@@ -295,6 +296,8 @@ export default function Page() {
               <SmartCaseHistoryView />
             </div>
           )}
+
+          {activeTab === "patient-summary" && <PatientClinicalSummaryPage />}
 
           {/* AI CONFIG SECTION */}
           {activeTab === "ai-config" && (

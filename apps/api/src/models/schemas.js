@@ -163,6 +163,7 @@ const appointmentSchema = new Schema(
   {
     patient_id: { type: Schema.Types.ObjectId, ref: "Patient", required: true },
     hospital_id: { type: Schema.Types.ObjectId, ref: "Hospital", required: true },
+    doctor_id: { type: Schema.Types.ObjectId, ref: "Doctor", default: null },
     scheduled_for: { type: Date, required: true },
     department: { type: String, default: "General Medicine" },
     reason: { type: String, default: null },
@@ -243,6 +244,8 @@ const reportSchema = new Schema(
     date: { type: Date, default: Date.now },
     uploaded_by: { type: Schema.Types.ObjectId, ref: "User", default: null },
     summary: { type: String, default: null },
+    extracted_points: { type: [String], default: [] },
+    extraction_source: { type: String, default: null },
     flagged_findings: { type: [String], default: [] },
   },
   { timestamps: true }
