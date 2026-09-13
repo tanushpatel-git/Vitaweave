@@ -19,6 +19,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.24.4",
     "multer": "^2.3.0",
+    "pdf-parse": "^2.4.5",
     "tesseract.js": "^7.0.0",
     "uuid": "^11.0.3",
     "zod": "^4.6.4"

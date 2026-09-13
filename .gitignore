@@ -42,3 +42,8 @@ ml-models/
 
 # Model artifacts (keep code, not binaries)
 *.pkl
+*.traineddata
+
+# Runtime uploads
+apps/api/uploads/
+
