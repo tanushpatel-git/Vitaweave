@@ -1,11 +1,76 @@
 "use client";
 
-import { CalendarDays, LoaderCircle, X } from "lucide-react";
+import { CalendarDays, ClipboardList, LoaderCircle, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import type { HospitalAppointment } from "../../../../lib/api";
 
 type Props = { appointments: HospitalAppointment[]; loading?: boolean; onCancel: (appointment: HospitalAppointment) => void; onReschedule: (appointment: HospitalAppointment) => void; };
 const statusClass: Record<HospitalAppointment["status"], string> = { requested: "bg-amber-50 text-amber-700", confirmed: "bg-emerald-50 text-emerald-700", completed: "bg-slate-100 text-slate-600", cancelled: "bg-rose-50 text-rose-700" };
 
 export default function PatientAppointments({ appointments, loading, onCancel, onReschedule }: Props) {
-  return <section className="mt-5 rounded-[25px] border border-[#e0e7e3] bg-white p-6"><div className="flex items-center justify-between"><div><p className="text-[8px] uppercase tracking-[0.2em] text-[#9ca7a3]">My care</p><h3 className="mt-2 text-[19px] font-medium tracking-[-0.04em]">Appointments</h3></div>{loading && <LoaderCircle size={17} className="animate-spin text-[#63857b]"/>}</div><div className="mt-5 space-y-3">{!loading && !appointments.length && <p className="rounded-xl bg-[#f8faf9] p-4 text-sm text-[#71807a]">No appointments yet. Use “Book appointment” to send your first request.</p>}{appointments.map((appointment) => <article key={appointment._id} className="rounded-[16px] border border-[#e8edeb] p-4"><div className="flex items-start gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-[12px] bg-[#edf5f2]"><CalendarDays size={16} className="text-[#608e81]"/></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="text-sm font-medium">{appointment.department}</p><span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${statusClass[appointment.status]}`}>{appointment.status}</span></div><p className="mt-1 text-xs text-[#596862]">{new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(appointment.scheduled_for))}</p><p className="mt-1 text-xs text-[#8a9691]">{appointment.hospital?.name || "Hospital"}{appointment.doctor ? ` · ${appointment.doctor.full_name}` : ""}</p>{appointment.reason && <p className="mt-2 text-xs text-[#596862]">{appointment.reason}</p>}</div></div>{["requested", "confirmed"].includes(appointment.status) && <div className="mt-3 flex justify-end gap-2"><button onClick={() => onCancel(appointment)} className="flex h-8 items-center gap-1 rounded-lg border border-rose-100 px-2.5 text-[10px] font-medium text-rose-700"><X size={12}/>Cancel</button>{appointment.status === "requested" && <button onClick={() => onReschedule(appointment)} className="h-8 rounded-lg border border-[#d5e3de] px-2.5 text-[10px] font-medium text-[#52786d]">Reschedule</button>}</div>}</article>)}</div></section>;
+  const router = useRouter();
+  return (
+    <section className="mt-5 rounded-[25px] border border-[#e0e7e3] bg-white p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[8px] uppercase tracking-[0.2em] text-[#9ca7a3]">My care</p>
+          <h3 className="mt-2 text-[19px] font-medium tracking-[-0.04em]">Appointments</h3>
+        </div>
+        {loading && <LoaderCircle size={17} className="animate-spin text-[#63857b]" />}
+      </div>
+      <div className="mt-5 space-y-3">
+        {!loading && !appointments.length && (
+          <p className="rounded-xl bg-[#f8faf9] p-4 text-sm text-[#71807a]">
+            No appointments yet. Use “Book appointment” to send your first request.
+          </p>
+        )}
+        {appointments.map((appointment) => (
+          <article key={appointment._id} className="rounded-[16px] border border-[#e8edeb] p-4">
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[12px] bg-[#edf5f2]">
+                <CalendarDays size={16} className="text-[#608e81]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium">{appointment.department}</p>
+                  <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${statusClass[appointment.status]}`}>{appointment.status}</span>
+                </div>
+                <p className="mt-1 text-xs text-[#596862]">
+                  {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(appointment.scheduled_for))}
+                </p>
+                <p className="mt-1 text-xs text-[#8a9691]">
+                  {appointment.hospital?.name || "Hospital"}
+                  {appointment.doctor ? ` · ${appointment.doctor.full_name}` : ""}
+                </p>
+                {appointment.reason && <p className="mt-2 text-xs text-[#596862]">{appointment.reason}</p>}
+              </div>
+            </div>
+            {appointment.department_id && ["requested", "confirmed"].includes(appointment.status) && (
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={() => router.push(`/patient/screening/${appointment._id}`)}
+                  className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-medium ${
+                    appointment.pre_consultation?.completed
+                      ? "border border-[#d5e3de] text-[#52786d]"
+                      : "bg-[#17221f] text-white"
+                  }`}
+                >
+                  <ClipboardList size={12} />
+                  {appointment.pre_consultation?.completed ? "View screening" : "Complete pre-consultation screening"}
+                </button>
+                <button onClick={() => onCancel(appointment)} className="flex h-8 items-center gap-1 rounded-lg border border-rose-100 px-2.5 text-[10px] font-medium text-rose-700">
+                  <X size={12} />Cancel
+                </button>
+                {appointment.status === "requested" && (
+                  <button onClick={() => onReschedule(appointment)} className="h-8 rounded-lg border border-[#d5e3de] px-2.5 text-[10px] font-medium text-[#52786d]">
+                    Reschedule
+                  </button>
+                )}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }

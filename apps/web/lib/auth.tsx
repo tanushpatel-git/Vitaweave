@@ -28,10 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStoredUser(res.user);
     setUser(res.user);
 
-    if (res.user.role === "DOCTOR") {
-      router.push("/doctor/dashboard");
-    } else if (res.user.role === "HOSPITAL") {
+    if (res.user.role === "TOP_ADMIN") {
+      router.push("/admin/dashboard");
+    } else if (res.user.role === "HOSPITAL_ADMIN" || res.user.role === "STAFF") {
       router.push("/hospital/dashboard");
+    } else if (res.user.role === "HOD" || res.user.role === "DOCTOR") {
+      router.push("/doctor/dashboard");
     } else {
       router.push("/patient/dashboard");
     }

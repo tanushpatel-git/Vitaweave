@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useAuth } from "../../../lib/auth";
@@ -374,13 +373,22 @@ export function HospitalLoginPage() {
 
               {/* Registration */}
               <p className="mt-6 text-center text-xs text-[#89938f]">
-                New hospital to VITAWEAVE?{" "}
-                <Link
-                  href="/hospital/register"
+                Hospital workspaces are provisioned by the{" "}
+                <button
+                  onClick={() => router.push("/")}
                   className="font-medium text-[#35403d] underline decoration-[#c5ceca] underline-offset-4 transition-colors hover:text-[#17201d]"
                 >
-                  Register organization
-                </Link>
+                  platform administrator
+                </button>
+              </p>
+              <p className="mt-2 text-center text-xs text-[#89938f]">
+                Platform admin?{" "}
+                <button
+                  onClick={() => router.push("/admin/login")}
+                  className="font-medium text-[#35403d] underline decoration-[#c5ceca] underline-offset-4 transition-colors hover:text-[#17201d]"
+                >
+                  Sign in to the platform console
+                </button>
               </p>
             </motion.div>
           </div>

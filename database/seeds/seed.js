@@ -42,7 +42,7 @@ function loadEnv() {
 //     dbName: config.mongoDbName,
 //   });
 // }
-async function upsertUser(db, { email, full_name, role, password }) {
+async function upsertUser(db, { email, full_name, role, password, hospital_id = null, department_id = null }) {
   const hash = await bcrypt.hash(password, 10);
   const now = new Date();
   const filter = { email };
@@ -52,6 +52,8 @@ async function upsertUser(db, { email, full_name, role, password }) {
     role,
     full_name,
     is_active: true,
+    hospital_id: hospital_id || null,
+    department_id: department_id || null,
     createdAt: now,
     updatedAt: now,
   };
@@ -80,14 +82,21 @@ async function main() {
   const admin = await upsertUser(db, {
     email: "admin@medchat.dev",
     full_name: "System Admin",
-    role: "ADMIN",
+    role: "TOP_ADMIN",
     password: "admin12345",
+  });
+
+  const hospitalAdmin = await upsertUser(db, {
+    email: "hospital@medchat.dev",
+    full_name: "City General Administrator",
+    role: "HOSPITAL_ADMIN",
+    password: "hospital12345",
   });
 
   const drSharma = await upsertUser(db, {
     email: "sharma@medchat.dev",
     full_name: "Dr. Anil Sharma",
-    role: "DOCTOR",
+    role: "HOD",
     password: "doctor12345",
   });
   const drIyer = await upsertUser(db, {
@@ -95,6 +104,13 @@ async function main() {
     full_name: "Dr. Meera Iyer",
     role: "DOCTOR",
     password: "doctor12345",
+  });
+
+  const staffReception = await upsertUser(db, {
+    email: "reception@medchat.dev",
+    full_name: "Reception Desk",
+    role: "STAFF",
+    password: "staff12345",
   });
 
   const patRohan = await upsertUser(db, {
@@ -110,25 +126,191 @@ async function main() {
     password: "patient12345",
   });
 
-  const hospitalAdmin = await upsertUser(db, {
-    email: "hospital@medchat.dev",
-    full_name: "City General Administrator",
-    role: "HOSPITAL",
-    password: "hospital12345",
-  });
+  // Hospital (City General) is owned by the HOSPITAL_ADMIN user.
+  const cityGeneral = await upsertOne(
+    db,
+    "hospitals",
+    { code: "VITA-CGH-001" },
+    {
+      user_id: hospitalAdmin._id,
+      code: "VITA-CGH-001",
+      name: "City General Hospital",
+      hospital_type: "Tertiary",
+      registration_number: "MHR-2021-08421",
+      administrator_name: "City General Administrator",
+      official_email: hospitalAdmin.email,
+      phone: "+91 22 4000 0100",
+      location: { address: "S.V. Road, Andheri West", city: "Mumbai", state: "Maharashtra", pincode: "400058", latitude: 19.076, longitude: 72.8777 },
+      icu_total_beds: 300,
+      general_total_beds: 1500,
+      active_doctors: 85,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+
+  // Link the hospital admin to their hospital.
+  await db.collection("users").updateOne({ _id: hospitalAdmin._id }, { $set: { hospital_id: cityGeneral._id } });
+
+  // Departments. General Medicine's HOD is Dr. Sharma.
+  const genMed = await upsertOne(
+    db,
+    "departments",
+    { hospital_id: cityGeneral._id, name: "General Medicine" },
+    {
+      hospital_id: cityGeneral._id,
+      name: "General Medicine",
+      code: "GM",
+      description: "Primary care and general internal medicine.",
+      hod_id: drSharma._id,
+      is_active: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+  const cardiology = await upsertOne(
+    db,
+    "departments",
+    { hospital_id: cityGeneral._id, name: "Cardiology" },
+    {
+      hospital_id: cityGeneral._id,
+      name: "Cardiology",
+      code: "CARD",
+      description: "Heart and vascular care.",
+      is_active: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+  const endocrinology = await upsertOne(
+    db,
+    "departments",
+    { hospital_id: cityGeneral._id, name: "Endocrinology" },
+    {
+      hospital_id: cityGeneral._id,
+      name: "Endocrinology",
+      code: "ENDO",
+      description: "Hormonal, diabetic and metabolic care.",
+      is_active: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+  await upsertOne(
+    db,
+    "departments",
+    { hospital_id: cityGeneral._id, name: "Orthopedics" },
+    {
+      hospital_id: cityGeneral._id,
+      name: "Orthopedics",
+      code: "ORTHO",
+      description: "Bone, joint and musculoskeletal care.",
+      is_active: true,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+
+  // Link HOD + staff users to their hospital context.
+  await db.collection("users").updateOne(
+    { _id: drSharma._id },
+    { $set: { hospital_id: cityGeneral._id, department_id: genMed._id, role: "HOD" } }
+  );
+  await db.collection("users").updateOne(
+    { _id: staffReception._id },
+    { $set: { hospital_id: cityGeneral._id } }
+  );
+
+  // Department questionnaires (pre-consultation screening)
+  const gmQ1 = new ObjectId();
+  const gmQ2 = new ObjectId();
+  const gmQ3 = new ObjectId();
+  const gmQ4 = new ObjectId();
+  await upsertOne(
+    db,
+    "departmentquestionnaires",
+    { department_id: genMed._id },
+    {
+      hospital_id: cityGeneral._id,
+      department_id: genMed._id,
+      title: "General Medicine pre-consultation screening",
+      description: "Asked to patients before their OPD consultation.",
+      version: 1,
+      languages: ["English", "Hindi"],
+      is_active: true,
+      questions: [
+        { _id: gmQ1, text: "What problem are you experiencing?", text_hi: "आपको क्या समस्या हो रही है?", answer_type: "text_voice", required: true, options: [], show_if_question: null, show_if_value: null, order: 0, createdAt: now, updatedAt: now },
+        { _id: gmQ2, text: "Do you have a fever?", text_hi: "क्या आपको बुखार है?", answer_type: "yes_no", required: true, options: [], show_if_question: null, show_if_value: null, order: 1, createdAt: now, updatedAt: now },
+        { _id: gmQ3, text: "Since when do you have the fever?", text_hi: "बुखार कब से है?", answer_type: "text_voice", required: true, options: [], show_if_question: String(gmQ2), show_if_value: "Yes", order: 2, createdAt: now, updatedAt: now },
+        { _id: gmQ4, text: "Rate your overall discomfort from 1 to 10", text_hi: "1 से 10 के पैमाने पर अपनी परेशानी को रेट करें", answer_type: "number", required: false, options: [], show_if_question: null, show_if_value: null, order: 3, createdAt: now, updatedAt: now },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+  const cardQ1 = new ObjectId();
+  const cardQ2 = new ObjectId();
+  const cardQ3 = new ObjectId();
+  const cardQ4 = new ObjectId();
+  await upsertOne(
+    db,
+    "departmentquestionnaires",
+    { department_id: cardiology._id },
+    {
+      hospital_id: cityGeneral._id,
+      department_id: cardiology._id,
+      title: "Cardiology pre-consultation screening",
+      description: "Asked to patients before their cardiology consultation.",
+      version: 1,
+      languages: ["English", "Hindi"],
+      is_active: true,
+      questions: [
+        { _id: cardQ1, text: "Why are you visiting the cardiology department?", text_hi: "आप कार्डियोलॉजी विभाग में क्यों आए हैं?", answer_type: "text", required: true, options: [], show_if_question: null, show_if_value: null, order: 0, createdAt: now, updatedAt: now },
+        { _id: cardQ2, text: "Are you experiencing chest pain?", text_hi: "क्या आपको सीने में दर्द हो रहा है?", answer_type: "yes_no", required: true, options: [], show_if_question: null, show_if_value: null, order: 1, createdAt: now, updatedAt: now },
+        { _id: cardQ3, text: "Describe the chest discomfort, including since when", text_hi: "सीने की तकलीफ के बारे में बताएं, कब से है", answer_type: "text_voice", required: true, options: [], show_if_question: String(cardQ2), show_if_value: "Yes", order: 2, createdAt: now, updatedAt: now },
+        { _id: cardQ4, text: "How long do symptoms typically last?", text_hi: "लक्षण आमतौर पर कितने समय तक रहते हैं?", answer_type: "multiple_choice", required: false, options: ["A few minutes", "Up to an hour", "Hours", "The whole day"], show_if_question: null, show_if_value: null, order: 3, createdAt: now, updatedAt: now },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
 
   // doctors
   const doc1 = await upsertOne(
     db,
     "doctors",
     { user_id: drSharma._id },
-    { user_id: drSharma._id, specialty: "General Medicine", license_no: "MH-12345", createdAt: now, updatedAt: now }
+    {
+      user_id: drSharma._id,
+      hospital_id: cityGeneral._id,
+      department_id: genMed._id,
+      specialty: "General Medicine",
+      license_no: "MH-12345",
+      is_hod: true,
+      createdAt: now,
+      updatedAt: now,
+    }
   );
   const doc2 = await upsertOne(
     db,
     "doctors",
     { user_id: drIyer._id },
-    { user_id: drIyer._id, specialty: "Cardiology", license_no: "MH-67890", createdAt: now, updatedAt: now }
+    {
+      user_id: drIyer._id,
+      hospital_id: cityGeneral._id,
+      department_id: cardiology._id,
+      specialty: "Cardiology",
+      license_no: "MH-67890",
+      is_hod: false,
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+
+  // Link drIyer user to their hospital + department.
+  await db.collection("users").updateOne(
+    { _id: drIyer._id },
+    { $set: { hospital_id: cityGeneral._id, department_id: cardiology._id } }
   );
 
   // patients
@@ -200,25 +382,6 @@ async function main() {
   // Hospital capacity network. These are synthetic operational records only;
   // they are designed to exercise the capacity forecasting dashboard and must
   // never be interpreted as real patient or facility data.
-  const cityGeneral = await upsertOne(
-    db,
-    "hospitals",
-    { code: "VITA-CGH-001" },
-    {
-      user_id: hospitalAdmin._id,
-      code: "VITA-CGH-001",
-      name: "City General Hospital",
-      administrator_name: "City General Administrator",
-      official_email: hospitalAdmin.email,
-      location: { city: "Mumbai", latitude: 19.076, longitude: 72.8777 },
-      icu_total_beds: 300,
-      general_total_beds: 1500,
-      active_doctors: 85,
-      createdAt: now,
-      updatedAt: now,
-    }
-  );
-
   const nearbyHospitals = [
     { code: "VITA-GVM-002", name: "Green Valley Medical Centre", distance_km: 4.8, icu_total_beds: 120, icu_occupied: 62, general_total_beds: 500, general_occupied: 275 },
     { code: "VITA-RSH-003", name: "Riverside Hospital", distance_km: 7.2, icu_total_beds: 90, icu_occupied: 76, general_total_beds: 380, general_occupied: 320 },
@@ -248,12 +411,168 @@ async function main() {
     {
       patient_id: pat2._id,
       hospital_id: cityGeneral._id,
+      doctor_id: null,
+      department_id: endocrinology._id,
       scheduled_for: priyaAppointmentTime,
       department: "Endocrinology",
       reason: "Diabetes follow-up and medication review",
       status: "confirmed",
       createdAt: now,
       updatedAt: now,
+    }
+  );
+
+  // ── Deep Patient Flow demo: Rohan (PAT-1001) is a REPEAT VISIT. ──────────
+  // He already had a completed abdominal-pain pre-consultation (visit 1). His
+  // new appointment makes him a follow-up so the conversation planner can show
+  // recurrence intelligence ("phir se dard" → asks about the previous
+  // treatment) and "new since last visit" is meaningful in the doctor view.
+  const rohanVisit1 = new Date(now);
+  rohanVisit1.setUTCDate(rohanVisit1.getUTCDate() - 5);
+  const rohanAppointmentTime = new Date(now);
+  rohanAppointmentTime.setUTCDate(rohanAppointmentTime.getUTCDate() + 1);
+  rohanAppointmentTime.setUTCHours(9, 30, 0, 0);
+
+  const rohanAppointment = await upsertOne(
+    db,
+    "appointments",
+    { patient_id: pat1._id, hospital_id: cityGeneral._id, scheduled_for: rohanAppointmentTime },
+    {
+      patient_id: pat1._id,
+      hospital_id: cityGeneral._id,
+      doctor_id: doc1._id,
+      department_id: genMed._id,
+      scheduled_for: rohanAppointmentTime,
+      department: "General Medicine",
+      reason: "Recurrent abdominal pain",
+      status: "confirmed",
+      createdAt: now,
+      updatedAt: now,
+    }
+  );
+
+  const previousVisitQ1 = String(gmQ1);
+  const previousVisitQ2 = String(gmQ2);
+  const previousVisitQ4 = String(gmQ4);
+  // Several days ago Rohan completed a pre-consultation for the SAME department
+  // but a DIFFERENT appointment (visit 1). We use a dedicated record so the
+  // planner sees "previous visit" context for the brand-new appointment.
+  const rohanPrevAppointment = await upsertOne(
+    db,
+    "appointments",
+    { patient_id: pat1._id, hospital_id: cityGeneral._id, scheduled_for: rohanVisit1 },
+    {
+      patient_id: pat1._id,
+      hospital_id: cityGeneral._id,
+      doctor_id: doc1._id,
+      department_id: genMed._id,
+      scheduled_for: rohanVisit1,
+      department: "General Medicine",
+      reason: "Stomach pain and mild discomfort",
+      status: "completed",
+      createdAt: rohanVisit1,
+      updatedAt: rohanVisit1,
+    }
+  );
+  await upsertOne(
+    db,
+    "preconsultations",
+    { appointment_id: rohanPrevAppointment._id },
+    {
+      appointment_id: rohanPrevAppointment._id,
+      hospital_id: cityGeneral._id,
+      department_id: genMed._id,
+      patient_id: pat1._id,
+      questionnaire_id: null,
+      questionnaire_version: 1,
+      visit_number: 1,
+      status: "completed",
+      started_at: rohanVisit1,
+      completed_at: rohanVisit1,
+      answers: [
+        {
+          question_id: previousVisitQ1,
+          question_text: "What problem are you experiencing?",
+          answer_type: "text_voice",
+          category: "doctor",
+          value: "Mild persistent abdominal pain",
+          value_original: "Pet mein halka dard tha",
+          translated: true,
+          language: "hinglish",
+          structured: { summary: "Mild persistent abdominal pain", duration: "5 days", location: "Abdomen", recurrence: "false" },
+          confidence: "auto",
+          skipped: false,
+          not_known: false,
+          corrected: false,
+          fact_status: "reported",
+        },
+        {
+          question_id: previousVisitQ2,
+          question_text: "Do you have a fever?",
+          answer_type: "yes_no",
+          category: "doctor",
+          value: "No",
+          value_original: "Nahi",
+          translated: true,
+          language: "hi",
+          structured: {},
+          confidence: "auto",
+          skipped: false,
+          not_known: false,
+          corrected: false,
+          fact_status: "reported",
+        },
+        {
+          question_id: previousVisitQ4,
+          question_text: "Rate your overall discomfort from 1 to 10",
+          answer_type: "number",
+          category: "doctor",
+          value: 4,
+          value_original: "4",
+          translated: false,
+          language: "en",
+          structured: {},
+          confidence: "auto",
+          skipped: false,
+          not_known: false,
+          corrected: false,
+          fact_status: "reported",
+        },
+      ],
+      conversation_log: [
+        { role: "ai", question_id: previousVisitQ1, text: "What problem are you experiencing?", hi: "आपको क्या समस्या हो रही है?", ts: rohanVisit1 },
+        { role: "patient", question_id: previousVisitQ1, text: "Pet mein halka dard tha", language: "hinglish", ts: rohanVisit1 },
+        { role: "ai", question_id: previousVisitQ2, text: "Do you have a fever?", hi: "क्या आपको बुखार है?", ts: rohanVisit1 },
+        { role: "patient", question_id: previousVisitQ2, text: "Nahi", language: "hi", ts: rohanVisit1 },
+        { role: "ai", question_id: previousVisitQ4, text: "Rate your overall discomfort from 1 to 10", hi: "1 से 10 के पैमाने पर अपनी परेशानी को रेट करें", ts: rohanVisit1 },
+        { role: "patient", question_id: previousVisitQ4, text: "4", language: "en", ts: rohanVisit1 },
+      ],
+      conversation_plan: [
+        { type: "doctor", question_id: previousVisitQ1, question_text: "What problem are you experiencing?", created_at: rohanVisit1 },
+        { type: "doctor", question_id: previousVisitQ2, question_text: "Do you have a fever?", created_at: rohanVisit1 },
+        { type: "doctor", question_id: previousVisitQ4, question_text: "Rate your overall discomfort from 1 to 10", created_at: rohanVisit1 },
+      ],
+      facts: [
+        { key: "symptom.primary", fact: "Primary symptom", value: "Abdominal pain", question_id: previousVisitQ1, source: "patient", visit_id: "V001", recorded_at: rohanVisit1, status: "current", confidence: "auto" },
+        { key: "duration", fact: "Duration", value: "5 days", question_id: previousVisitQ1, source: "patient", visit_id: "V001", recorded_at: rohanVisit1, status: "current", confidence: "auto" },
+        { key: "location", fact: "Location", value: "Abdomen", question_id: previousVisitQ1, source: "patient", visit_id: "V001", recorded_at: rohanVisit1, status: "current", confidence: "auto" },
+        { key: "recurrence", fact: "Symptom recurrence", value: "false", question_id: previousVisitQ1, source: "patient", visit_id: "V001", recorded_at: rohanVisit1, status: "current", confidence: "auto" },
+      ],
+      summary: {
+        narrative:
+          "Chief complaint\nMild persistent abdominal pain for 5 days.\n\nSymptoms\nWhat problem are you experiencing?: Mild persistent abdominal pain\nRate your overall discomfort from 1 to 10: 4\n\nMedications, home remedies or self care\nDoctor prescribed a short course of antacid; patient reported improvement.\n\nClinical snapshot\nFirst recorded general-medicine screening for this patient.",
+        sections: {
+          chief_complaint: "Mild persistent abdominal pain for 5 days.",
+          onset_and_duration: "5 days before visit.",
+          symptoms: "Mild persistent abdominal pain, located in the abdomen.",
+          current_treatment_and_self_care: "Doctor prescribed a short course of antacid tablets; patient took them and felt better.",
+          new_since_last_visit: "First recorded visit for this complaint.",
+          patients_own_words: "Pet mein halka dard tha (mild pain in the abdomen).",
+          disclaimer: "This summary was generated from the patient's own answers and is for reference only.",
+        },
+        source: "comprehensive",
+      },
+      corrections: [],
     }
   );
 
@@ -474,12 +793,13 @@ async function main() {
   );
 
   console.log("Seed complete.");
-  console.log("  Admin  : admin@medchat.dev / admin12345");
-  console.log("  Doctor : sharma@medchat.dev / doctor12345");
-  console.log("  Doctor : iyer@medchat.dev   / doctor12345");
-  console.log("  Patient: rohan@medchat.dev  / patient12345");
-  console.log("  Patient: priya@medchat.dev  / patient12345");
-  console.log("  Hospital: hospital@medchat.dev / hospital12345");
+  console.log("  Top Admin  : admin@medchat.dev   / admin12345");
+  console.log("  HOD Doctor : sharma@medchat.dev  / doctor12345  (General Medicine)");
+  console.log("  Doctor     : iyer@medchat.dev    / doctor12345  (Cardiology)");
+  console.log("  Hospital   : hospital@medchat.dev / hospital12345");
+  console.log("  Staff      : reception@medchat.dev / staff12345");
+  console.log("  Patient    : rohan@medchat.dev   / patient12345");
+  console.log("  Patient    : priya@medchat.dev   / patient12345");
   console.log("  Hospital capacity network: 4 synthetic hospitals / 14 daily snapshots");
   await client.close();
 }

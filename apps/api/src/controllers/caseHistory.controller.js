@@ -8,6 +8,8 @@ const {
   Report,
   Consent,
   PatientAccessLog,
+  Appointment,
+  PreConsultation,
 } = require("../models/schemas");
 const { AppError } = require("../utils/async");
 const { config } = require("../config");
@@ -175,12 +177,55 @@ async function getPatientClinicalSummary(req, res) {
   const patient = await Patient.findById(id).populate("user_id", "full_name email").lean();
   if (!patient) throw new AppError("Patient not found", 404);
 
-  const [consultations, caseSheets, medications, reports] = await Promise.all([
+  const [consultations, caseSheets, medications, reports, appointments, screenings] = await Promise.all([
     Consultation.find({ patient_id: id }).populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).sort({ date: -1 }).lean(),
     CaseSheet.find({ patient_id: id }).sort({ reviewed_at: -1, createdAt: -1 }).lean(),
     Medication.find({ patient_id: id, active: true }).sort({ start_date: -1 }).lean(),
-    Report.find({ patient_id: id }).sort({ date: -1 }).limit(5).lean(),
+    Report.find({ patient_id: id }).populate("uploaded_by", "full_name role").sort({ date: -1 }).limit(8).lean(),
+    Appointment.find({ patient_id: id }).populate({ path: "doctor_id", populate: { path: "user_id", select: "full_name" } }).sort({ scheduled_for: -1 }).limit(6).lean(),
+    PreConsultation.find({ patient_id: id }).sort({ createdAt: -1 }).lean(),
   ]);
+  const screeningByAppointment = new Map(screenings.map((submission) => [String(submission.appointment_id), submission]));
+  const appointmentsWithScreening = appointments.map((appointment) => {
+    const screening = screeningByAppointment.get(String(appointment._id));
+    return {
+      _id: String(appointment._id),
+      scheduled_for: appointment.scheduled_for,
+      department: appointment.department || "General consultation",
+      department_id: appointment.department_id ? String(appointment.department_id._id || appointment.department_id) : null,
+      status: appointment.status,
+      doctor: appointment.doctor_id ? { id: String(appointment.doctor_id._id || appointment.doctor_id), full_name: appointment.doctor_id.user_id?.full_name || "Doctor" } : null,
+      screening: screening
+        ? {
+            completed: screening.status === "completed",
+            version: screening.questionnaire_version,
+            visit_number: screening.visit_number || null,
+            summary: screening.summary || null,
+            answers: (screening.answers || []).map((a) => ({
+              question_id: a.question_id,
+              question_text: a.question_text,
+              answer_type: a.answer_type,
+              category: a.category || "doctor",
+              value: a.value,
+              value_original: a.value_original ?? null,
+              translated: Boolean(a.translated),
+              language: a.language || null,
+              skipped: Boolean(a.skipped),
+              not_known: Boolean(a.not_known),
+              corrected: Boolean(a.corrected),
+              correction: a.correction || null,
+              fact_status: a.fact_status || "reported",
+              detected: a.detected || null,
+            })),
+            conversation: screening.conversation_log || [],
+            follow_ups: screening.follow_ups || [],
+            facts: screening.facts || [],
+            corrections: screening.corrections || [],
+            plan: screening.conversation_plan || [],
+          }
+        : null,
+    };
+  });
   const caseSheetByConsultation = new Map(caseSheets.map((sheet) => [String(sheet.consultation_id), sheet]));
   const orderedSheets = consultations.map((consultation) => caseSheetByConsultation.get(String(consultation._id))).filter(Boolean);
   const unique = (items) => [...new Set(items.filter(Boolean))];
@@ -193,6 +238,7 @@ async function getPatientClinicalSummary(req, res) {
     summary: {
       patient: { id: String(patient._id), full_name: patient.user_id?.full_name || "Patient", custom_id: patient.custom_id || `PAT-${String(patient._id).slice(-4).toUpperCase()}`, dob: patient.dob, sex: patient.sex, blood_type: patient.blood_type },
       consultation_count: consultations.length,
+      appointment_count: appointments.length,
       report_count: reports.length,
       latest_activity: latestConsultation?.date || latestSheet?.reviewed_at || patient.updatedAt,
       current_assessment: latestSheet?.diagnosis || "No finalized diagnosis recorded yet.",
@@ -203,8 +249,25 @@ async function getPatientClinicalSummary(req, res) {
       chronic_conditions: patient.chronic_conditions || [],
       active_medications: medications.slice(0, 3).map((medication) => ({ name: medication.name, dosage: medication.dosage, duration: medication.duration })),
       recent_reports: reports.map((report) => ({ title: report.title, type: report.type, date: report.date })),
-      prescription_insights: reports.filter((report) => report.type === "Prescription").slice(0, 2).map((report) => ({ title: report.title, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Prescription uploaded — document review needed."]).slice(0, 3), source: report.extraction_source || "upload metadata only", status: report.extraction_status || "needs_review" })),
+prescription_insights: reports.filter((report) => report.type === "Prescription").slice(0, 2).map((report) => ({ title: report.title, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Prescription uploaded — document review needed."]).slice(0, 3), source: report.extraction_source || "upload metadata only", status: report.extraction_status || "needs_review" })),
       report_insights: reports.filter((report) => report.type !== "Prescription").slice(0, 2).map((report) => ({ title: report.title, type: report.type, date: report.date, points: (report.extracted_points?.length ? report.extracted_points : report.summary ? [report.summary] : ["Report uploaded — document review needed."]).slice(0, 3), status: report.extraction_status || "needs_review" })),
+      document_insights: reports.map((report) => ({
+        id: String(report._id),
+        title: report.title,
+        type: report.type,
+        date: report.date,
+        file_url: report.file_url || null,
+        uploaded_by: report.uploaded_by ? { id: String(report.uploaded_by._id || report.uploaded_by), full_name: report.uploaded_by.full_name || null, role: report.uploaded_by.role || null } : null,
+        ai_status: report.ai_status || "pending",
+        ai_classified_type: report.ai_classified_type || null,
+        ai_summary: report.ai_summary || report.summary || null,
+        ai_findings: report.ai_findings || [],
+        flagged_findings: report.flagged_findings || [],
+        extracted_points: report.extracted_points || [],
+        ai_extracted_at: report.ai_extracted_at || null,
+        ai_error: report.ai_error || null,
+      })),
+      appointments: appointmentsWithScreening,
       clinical_note: "This overview is generated from Smart Case History consultations, documented case sheets, medicines, and reports. It supports—not replaces—clinical judgement.",
     },
   });

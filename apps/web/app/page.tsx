@@ -41,6 +41,16 @@ const portals = [
     surface: "bg-[#f4f0e9]",
     metric: "SIGNAL",
   },
+  {
+    href: "/admin/login",
+    label: "Admin",
+    eyebrow: "04 / PLATFORM",
+    description: "Hospital onboarding, accounts and platform oversight.",
+    icon: ShieldCheck,
+    accent: "text-[#8a5a44]",
+    surface: "bg-[#f4efec]",
+    metric: "CONTROL",
+  },
 ] as const;
 
 const signals = [

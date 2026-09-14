@@ -9,8 +9,10 @@ const conversationsRoutes = require("./routes/conversations.routes");
 const documentsRoutes = require("./routes/documents.routes");
 const aiConfigRoutes = require("./routes/aiConfig.routes");
 const adminRoutes = require("./routes/admin.routes");
+const hospitalRoutes = require("./routes/hospital.routes");
 const caseHistoryRoutes = require("./routes/caseHistory.routes");
 const appointmentsRoutes = require("./routes/appointments.routes");
+const medicalDocumentsRoutes = require("./routes/medicalDocuments.routes");
 const { connectDb, createIndexes } = require("./db");
 
 const app = express();
@@ -34,8 +36,10 @@ app.use("/api/conversations", conversationsRoutes);
 app.use("/api/documents", documentsRoutes);
 app.use("/api/ai-config", aiConfigRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/hospitals", hospitalRoutes);
 app.use("/api/case-history", caseHistoryRoutes);
 app.use("/api/appointments", appointmentsRoutes);
+app.use("/api/medical-documents", medicalDocumentsRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });

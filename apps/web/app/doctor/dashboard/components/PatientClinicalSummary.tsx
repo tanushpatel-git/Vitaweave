@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Brain, ClipboardList, Clock3, FileText, LoaderCircle, Pill, RefreshCw, Search } from "lucide-react";
-import { api, type PatientClinicalSummary, type PatientProfile } from "../../../../lib/api";
+import { AlertTriangle, Brain, CalendarDays, ClipboardList, Clock3, FileText, LoaderCircle, Pill, RefreshCw, Search, Stethoscope } from "lucide-react";
+import { api, apiFileUrl, type PatientClinicalSummary, type PatientProfile, type PatientDocumentInsight, type PatientHealthJourney } from "../../../../lib/api";
+import PatientJourneyBlock from "./PatientHealthJourney";
+import DeepScreeningSection from "./DeepScreeningView";
 
 export default function PatientClinicalSummaryPage() {
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<PatientProfile[]>([]);
   const [summary, setSummary] = useState<PatientClinicalSummary | null>(null);
+  const [journey, setJourney] = useState<PatientHealthJourney | null>(null);
+  const [journeyLoading, setJourneyLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -20,23 +24,163 @@ export default function PatientClinicalSummaryPage() {
   };
   const selectPatient = async (patient: PatientProfile) => {
     setQuery(`${patient.full_name} · ${patient.custom_id}`); setMatches([]); setLoading(true); setError("");
-    try { setSummary((await api.getPatientClinicalSummary(patient.id)).summary); }
-    catch (err) { setSummary(null); setError(err instanceof Error ? err.message : "Could not load the clinical summary."); }
-    finally { setLoading(false); }
+    try {
+      setJourney(null); setJourneyLoading(true);
+      const [summaryResult, journeyResult] = await Promise.all([
+        api.getPatientClinicalSummary(patient.id),
+        api.getPatientHealthJourney(patient.id),
+      ]);
+      setSummary(summaryResult.summary);
+      setJourney(journeyResult);
+    }
+    catch (err) { setSummary(null); setJourney(null); setError(err instanceof Error ? err.message : "Could not load the clinical summary."); }
+    finally { setLoading(false); setJourneyLoading(false); }
+  };
+  const refreshJourney = async () => {
+    if (!summary) return;
+    setJourneyLoading(true);
+    try { setJourney(await api.getPatientHealthJourney(summary.patient.id, true)); }
+    catch { /* keep existing journey */ }
+    finally { setJourneyLoading(false); }
   };
 
   useEffect(() => {
-    const interval = setInterval(() => { if (summary) api.getPatientClinicalSummary(summary.patient.id).then((result) => setSummary(result.summary)).catch(() => {}); }, 20000);
+    const interval = setInterval(() => {
+      if (!summary) return;
+      api.getPatientClinicalSummary(summary.patient.id).then((result) => setSummary(result.summary)).catch(() => {});
+      api.getPatientHealthJourney(summary.patient.id).then(setJourney).catch(() => {});
+    }, 20000);
     return () => clearInterval(interval);
   }, [summary]);
 
   return <div className="mx-auto max-w-6xl"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-[#71807a]">Smart Case History</p><h1 className="mt-1 text-3xl font-medium tracking-[-.045em]">Patient clinical summary</h1><p className="mt-2 text-sm text-[#71807a]">A live summary of every recorded consultation, case sheet, medicine, and report.</p></div>{summary && <button onClick={() => selectPatient({ id: summary.patient.id, full_name: summary.patient.full_name, custom_id: summary.patient.custom_id } as PatientProfile)} className="flex h-10 items-center gap-2 rounded-xl border border-[#dfe5e2] bg-white px-3 text-xs"><RefreshCw size={14}/>Refresh</button>}</div>
     <section className="relative mt-6 rounded-[22px] border border-[#e0e6e2] bg-white p-6"><label className="text-[10px] font-semibold uppercase tracking-[.16em] text-[#71807a]">Find patient by name or patient ID</label><div className="mt-3 flex gap-2"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && search()} placeholder="e.g. Priya Patel or PAT-1002" className="h-11 min-w-0 flex-1 rounded-xl border border-[#dfe5e2] bg-[#f9faf9] px-3 text-sm outline-none focus:border-[#8aaba0]"/><button onClick={search} disabled={loading} className="grid h-11 w-11 place-items-center rounded-xl bg-[#17221f] text-white"><Search size={16}/></button></div>{matches.length > 0 && <div className="absolute z-10 mt-2 w-[calc(100%-3rem)] rounded-xl border border-[#dfe5e2] bg-white p-1 shadow-xl">{matches.map((patient) => <button key={patient.id} onClick={() => selectPatient(patient)} className="w-full rounded-lg px-3 py-2.5 text-left hover:bg-[#f2f6f4]"><p className="text-sm font-medium">{patient.full_name}</p><p className="mt-0.5 font-mono text-[10px] text-[#71807a]">{patient.custom_id}</p></button>)}</div>}</section>
-    {error && <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}{loading && !summary && <div className="mt-5 grid min-h-[240px] place-items-center rounded-[22px] border border-[#e0e6e2] bg-white text-[#71807a]"><LoaderCircle size={20} className="animate-spin"/></div>}{summary && <ClinicalSummary summary={summary}/>}</div>;
+    {error && <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}{loading && !summary && <div className="mt-5 grid min-h-[240px] place-items-center rounded-[22px] border border-[#e0e6e2] bg-white text-[#71807a]"><LoaderCircle size={20} className="animate-spin"/></div>}{summary && <ClinicalSummary summary={summary} journey={journey} onRefreshJourney={refreshJourney} journeyLoading={journeyLoading}/>}</div>;
 }
 
-function ClinicalSummary({ summary }: { summary: PatientClinicalSummary }) { return <div className="mt-4 grid gap-3 xl:grid-cols-3"><section className="xl:col-span-3 rounded-[22px] bg-[#17221f] p-4 text-white"><div className="flex items-start justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-white/45">One-page clinical brief</p><h2 className="mt-1 text-xl font-medium">{summary.patient.full_name}</h2><p className="mt-1 font-mono text-xs text-white/50">{summary.patient.custom_id} · {summary.patient.blood_type || "Blood type not recorded"}</p></div><Brain size={20}/></div><div className="mt-4 grid grid-cols-3 gap-3"><Metric label="Consultations" value={summary.consultation_count}/><Metric label="Reports" value={summary.report_count}/><Metric label="Active medicines" value={summary.active_medications.length}/></div></section><Card title="Current assessment" icon={<ClipboardList size={16}/> }><p className="rounded-xl bg-[#f4f8f6] p-3 text-xs leading-5 text-[#34423c]">{summary.current_assessment}</p>{summary.latest_activity && <p className="mt-2 flex items-center gap-1.5 text-[10px] text-[#89958f]"><Clock3 size={12}/>Updated {new Date(summary.latest_activity).toLocaleDateString("en-IN")}</p>}</Card><Card title="Reported symptoms" icon={<AlertTriangle size={16}/> }><Tags values={summary.reported_symptoms.slice(0, 4)} tone="amber" empty="No documented symptoms."/></Card><Card title="Diagnoses" icon={<ClipboardList size={16}/> }><Tags values={summary.recent_diagnoses.slice(0, 3)} tone="green" empty="No finalized diagnosis yet."/></Card><Card title="Risk context" icon={<AlertTriangle size={16}/> }><p className="text-[10px] font-semibold uppercase text-[#89958f]">Allergies</p><Tags values={summary.known_allergies.slice(0, 3)} tone="rose" empty="None recorded"/><p className="mt-3 text-[10px] font-semibold uppercase text-[#89958f]">Conditions</p><Tags values={summary.chronic_conditions.slice(0, 3)} tone="amber" empty="None recorded"/></Card><Card title="Active medicines" icon={<Pill size={16}/> }>{summary.active_medications.length ? <div className="space-y-1.5">{summary.active_medications.map((medication, index) => <div key={`${medication.name}-${medication.dosage}-${index}`} className="rounded-lg bg-[#f8faf9] p-2 text-[11px]"><b>{medication.name}</b><span className="ml-1 text-[#66766f]">{medication.dosage}{medication.duration ? ` · ${medication.duration}` : ""}</span></div>)}</div> : <p className="text-xs text-[#89958f]">No active medicines.</p>}</Card><DocumentInsights title="Prescription insights" documents={summary.prescription_insights}/><DocumentInsights title="Report insights" documents={summary.report_insights}/><Card title="Latest advice" icon={<FileText size={16}/> }><ul className="space-y-1.5">{summary.latest_advice.slice(0, 2).length ? summary.latest_advice.slice(0, 2).map((advice, index) => <li key={`${advice}-${index}`} className="rounded-lg bg-[#f8faf9] p-2 text-[11px]">{advice}</li>) : <li className="text-xs text-[#89958f]">No advice recorded.</li>}</ul></Card><p className="rounded-xl border border-[#e2e8e5] bg-[#f8faf9] px-3 py-2 text-[10px] leading-4 text-[#71807a]">Clinical decision support only — review source records before acting.</p></div>; }
+
+function ClinicalSummary({ summary, journey, onRefreshJourney, journeyLoading }: { summary: PatientClinicalSummary; journey: PatientHealthJourney | null; onRefreshJourney: () => void; journeyLoading: boolean }) { return <div className="mt-4 grid gap-3 xl:grid-cols-3"><section className="xl:col-span-3 rounded-[22px] bg-[#17221f] p-4 text-white"><div className="flex items-start justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[.18em] text-white/45">One-page clinical brief</p><h2 className="mt-1 text-xl font-medium">{summary.patient.full_name}</h2><p className="mt-1 font-mono text-xs text-white/50">{summary.patient.custom_id} · {summary.patient.blood_type || "Blood type not recorded"}</p></div><Brain size={20}/></div><div className="mt-4 grid grid-cols-4 gap-3"><Metric label="Consultations" value={summary.consultation_count}/><Metric label="Appointments" value={summary.appointment_count}/><Metric label="Reports" value={summary.report_count}/><Metric label="Active medicines" value={summary.active_medications.length}/></div></section><PatientJourneyBlock journey={journey} loading={journeyLoading} onRefresh={onRefreshJourney} /><DocumentInsightsSection documents={summary.document_insights} /><AppointmentsSection appointments={summary.appointments || []} patientName={summary.patient.full_name}/><Card title="Current assessment" icon={<ClipboardList size={16}/> }><p className="rounded-xl bg-[#f4f8f6] p-3 text-xs leading-5 text-[#34423c]">{summary.current_assessment}</p>{summary.latest_activity && <p className="mt-2 flex items-center gap-1.5 text-[10px] text-[#89958f]"><Clock3 size={12}/>Updated {new Date(summary.latest_activity).toLocaleDateString("en-IN")}</p>}</Card><Card title="Reported symptoms" icon={<AlertTriangle size={16}/> }><Tags values={summary.reported_symptoms.slice(0, 4)} tone="amber" empty="No documented symptoms."/></Card><Card title="Diagnoses" icon={<ClipboardList size={16}/> }><Tags values={summary.recent_diagnoses.slice(0, 3)} tone="green" empty="No finalized diagnosis yet."/></Card><Card title="Risk context" icon={<AlertTriangle size={16}/> }><p className="text-[10px] font-semibold uppercase text-[#89958f]">Allergies</p><Tags values={summary.known_allergies.slice(0, 3)} tone="rose" empty="None recorded"/><p className="mt-3 text-[10px] font-semibold uppercase text-[#89958f]">Conditions</p><Tags values={summary.chronic_conditions.slice(0, 3)} tone="amber" empty="None recorded"/></Card><Card title="Active medicines" icon={<Pill size={16}/> }>{summary.active_medications.length ? <div className="space-y-1.5">{summary.active_medications.map((medication, index) => <div key={`${medication.name}-${medication.dosage}-${index}`} className="rounded-lg bg-[#f8faf9] p-2 text-[11px]"><b>{medication.name}</b><span className="ml-1 text-[#66766f]">{medication.dosage}{medication.duration ? ` · ${medication.duration}` : ""}</span></div>)}</div> : <p className="text-xs text-[#89958f]">No active medicines.</p>}</Card><DocumentInsights title="Report insights" documents={summary.report_insights}/><Card title="Prescription insights" icon={<FileText size={16}/>}>{summary.prescription_insights.length ? <div className="space-y-2">{summary.prescription_insights.map((prescription, index) => <div key={`${prescription.title}-${index}`} className="rounded-lg bg-[#f8faf9] p-2"><p className="text-[11px] font-semibold">{prescription.title}</p>{prescription.points.map((point, pointIndex) => <p key={`${point}-${pointIndex}`} className="mt-1 text-[10px] leading-4 text-[#66766f]">• {point}</p>)}</div>)}</div> : <p className="text-xs text-[#89958f]">No patient-uploaded prescriptions.</p>}</Card><Card title="Latest advice" icon={<FileText size={16}/> }><ul className="space-y-1.5">{summary.latest_advice.slice(0, 2).length ? summary.latest_advice.slice(0, 2).map((advice, index) => <li key={`${advice}-${index}`} className="rounded-lg bg-[#f8faf9] p-2 text-[11px]">{advice}</li>) : <li className="text-xs text-[#89958f]">No advice recorded.</li>}</ul></Card><p className="rounded-xl border border-[#e2e8e5] bg-[#f8faf9] px-3 py-2 text-[10px] leading-4 text-[#71807a]">Clinical decision support only — review source records before acting.</p></div>; }
 function Metric({ label, value }: { label: string; value: number }) { return <div className="rounded-xl bg-white/[.08] p-3"><p className="text-xl font-medium">{value}</p><p className="mt-1 text-[9px] uppercase tracking-[.1em] text-white/45">{label}</p></div>; }
 function DocumentInsights({ title, documents }: { title: string; documents: Array<{ title: string; points: string[]; status: string }> }) { return <Card title={title} icon={<FileText size={16}/>}>{documents.length ? <div className="space-y-2">{documents.map((document, index) => <div key={`${document.title}-${index}`} className="rounded-lg bg-[#f8faf9] p-2"><div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold">{document.title}</p><span className={`rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase ${document.status === "completed" ? "bg-emerald-50 text-emerald-700" : document.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{document.status === "completed" ? "OCR extracted" : document.status === "failed" ? "OCR unavailable" : "Review needed"}</span></div>{document.points.map((point, pointIndex) => <p key={`${point}-${pointIndex}`} className="mt-1 text-[10px] leading-4 text-[#66766f]">• {point}</p>)}</div>)}</div> : <p className="text-xs text-[#89958f]">No uploaded {title.toLowerCase()}.</p>}</Card>; }
+
+const AI_DISCLAIMER = "This is an AI-generated summary and must be verified by a qualified clinician against the original document.";
+
+function ReportStatusPill({ status }: { status: PatientDocumentInsight["ai_status"] }) {
+  if (status === "skipped")
+    return <span className="flex items-center gap-1 rounded-full bg-[#f0f2f1] px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-[#69736f]"><FileText size={10} /> Patient-entered</span>;
+  if (status === "processing")
+    return <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-amber-700"><Clock3 size={10} /> AI analysing</span>;
+  if (status === "completed")
+    return <span className="flex items-center gap-1 rounded-full bg-[#e4f1eb] px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-[#4c756c]"><Brain size={10} /> AI summary ready</span>;
+  if (status === "failed")
+    return <span className="flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-rose-700"><AlertTriangle size={10} /> AI unavailable</span>;
+  return <span className="rounded-full bg-[#f0f2f1] px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-[#89958f]">Queued</span>;
+}
+
+function findingStatusClass(status: string) {
+  if (["high", "low", "critical"].includes(status)) return "rounded-full bg-rose-50 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-rose-700";
+  if (status === "borderline") return "rounded-full bg-amber-50 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-amber-700";
+  return "rounded-full bg-[#e4f1eb] px-2 py-0.5 font-mono text-[9px] font-semibold uppercase text-[#4c756c]";
+}
+
+function DocumentInsightsSection({ documents }: { documents: PatientDocumentInsight[] }) {
+  if (!documents || documents.length === 0) return null;
+  const analysed = documents.filter((doc) => doc.ai_status === "completed").length;
+  return (
+    <section className="xl:col-span-3 rounded-[18px] border border-[#e0e6e2] bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[#52786d]">
+        <Brain size={16} />
+        <h3 className="text-sm font-medium text-[#17221f]">AI document summaries</h3>
+        <span className="ml-auto rounded-full bg-[#e4f1eb] px-2 py-0.5 font-mono text-[9px] text-[#4c756c]">{analysed} of {documents.length} analysed</span>
+      </div>
+      <div className="grid gap-3">
+        {documents.map((doc) => (
+          <article key={doc.id} className="rounded-xl border border-[#e8edeb] bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[11px] font-semibold">{doc.title}</p>
+              <span className="rounded-full bg-[#f0f2f1] px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-[#69736f]">{doc.type}</span>
+              {doc.ai_classified_type && doc.ai_classified_type !== doc.type && (
+                <span className="rounded-full bg-sky-50 px-2 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-wide text-sky-700">AI: {doc.ai_classified_type}</span>
+              )}
+              <ReportStatusPill status={doc.ai_status} />
+              <span className="ml-auto text-[10px] text-[#89958f]">{new Intl.DateTimeFormat("en-IN", { dateStyle: "medium" }).format(new Date(doc.date))}{doc.uploaded_by?.full_name ? ` · ${doc.uploaded_by.full_name}` : ""}</span>
+            </div>
+
+            {doc.ai_status === "completed" && doc.ai_summary && (
+              <div className="mt-2.5 rounded-lg bg-[#f7faf8] p-3">
+                <p className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[.1em] text-[#4c756c]"><Brain size={11} /> AI summary</p>
+                <p className="mt-1.5 text-[11px] leading-5 text-[#35403c]">{doc.ai_summary}</p>
+                {doc.ai_findings.length > 0 && (
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {doc.ai_findings.slice(0, 10).map((finding, index) => (
+                      <span key={`${finding.name}-${index}`} className={`rounded-full px-2 py-0.5 font-mono text-[9px] ${findingStatusClass(finding.status)}`}>
+                        {finding.name} {finding.value ?? ""}{finding.unit ? ` ${finding.unit}` : ""}
+                      </span>
+                    ))}
+                    {doc.ai_findings.length > 10 && <span className="rounded-full bg-[#f0f2f1] px-2 py-0.5 font-mono text-[9px] text-[#89958f]">+{doc.ai_findings.length - 10} more</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {doc.ai_status === "skipped" && doc.ai_summary && (
+              <div className="mt-2.5 rounded-lg bg-[#f7faf8] p-3">
+                <p className="text-[9px] font-bold uppercase tracking-[.1em] text-[#648678]">Details provided by patient</p>
+                <p className="mt-1.5 text-[11px] leading-5 text-[#35403c]">{doc.ai_summary}</p>
+              </div>
+            )}
+
+            {doc.flagged_findings.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {doc.flagged_findings.slice(0, 4).map((flag, index) => (
+                  <span key={`${flag}-${index}`} className="flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[10px] font-medium text-rose-700"><AlertTriangle size={10} /> {flag}</span>
+                ))}
+              </div>
+            )}
+
+            {doc.ai_status === "failed" && (
+              <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-700"><AlertTriangle size={11} /> {doc.ai_error || "AI extraction failed. Re-process the report from the Patient documents tab."}</p>
+            )}
+
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <p className="text-[9px] leading-4 text-[#89958f]">{AI_DISCLAIMER}</p>
+              {doc.file_url && <a href={apiFileUrl(doc.file_url) ?? undefined} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[10px] font-medium text-[#52786d] hover:underline"><FileText size={11} /> View original</a>}
+              <span className="ml-auto text-[9px] text-[#b0b8b4]">{doc.ai_extracted_at ? `Analysed ${new Date(doc.ai_extracted_at).toLocaleString("en-IN")}` : "AI analysis pending"}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+const appointmentStatusClass: Record<string, string> = { requested: "bg-amber-50 text-amber-700", confirmed: "bg-emerald-50 text-emerald-700", completed: "bg-slate-100 text-slate-600", cancelled: "bg-rose-50 text-rose-700" };
+
+function AppointmentsSection({ appointments, patientName }: { appointments: PatientClinicalSummary["appointments"]; patientName: string }) {
+  if (!appointments || appointments.length === 0) return null;
+  return (
+    <section className="xl:col-span-3 rounded-[18px] border border-[#e0e6e2] bg-white p-4">
+      <div className="mb-3 flex items-center gap-2 text-[#52786d]"><CalendarDays size={16} /><h3 className="text-sm font-medium text-[#17221f]">Appointments &amp; screening</h3></div>
+      <div className="grid gap-3">
+        {appointments.map((appointment) => (
+          <article key={appointment._id} className="rounded-xl border border-[#e8edeb] bg-white p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[11px] font-semibold">{appointment.department}</p>
+              <span className={`rounded-full px-2 py-0.5 text-[9px] font-bold uppercase ${appointmentStatusClass[appointment.status]}`}>{appointment.status}</span>
+              {appointment.screening?.completed && <span className="rounded-full bg-[#e4f1eb] px-2 py-0.5 font-mono text-[9px] text-[#648678]">Screening complete · v{appointment.screening.version}</span>}
+              {appointment.screening?.visit_number != null && <span className="rounded-full bg-[#f2f5f4] px-2 py-0.5 font-mono text-[9px] text-[#7b8581]">Visit {appointment.screening.visit_number}</span>}
+            </div>
+            <p className="mt-1 text-[10px] text-[#89958f]">{new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(appointment.scheduled_for))}{appointment.doctor ? ` · ${appointment.doctor.full_name}` : ""}</p>
+            {appointment.screening ? (
+              <DeepScreeningSection screening={appointment.screening} appointmentId={appointment._id} patientName={patientName} />
+            ) : (
+              <p className="mt-2 rounded-lg bg-[#f4f8f6] px-2.5 py-1.5 text-[10px] text-[#89958f]"><Stethoscope size={11} className="mr-1 inline" />Pre-consultation screening not completed yet.</p>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
 function Card({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) { return <section className="rounded-[18px] border border-[#e0e6e2] bg-white p-4"><div className="mb-2 flex items-center gap-2 text-[#52786d]">{icon}<h3 className="text-sm font-medium text-[#17221f]">{title}</h3></div>{children}</section>; }
 function Tags({ values, tone, empty }: { values: string[]; tone: "rose" | "amber" | "green"; empty: string }) { const style = tone === "rose" ? "bg-rose-50 text-rose-700" : tone === "amber" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"; return <div className="mt-2 flex flex-wrap gap-2">{values.length ? values.map((value, index) => <span key={`${value}-${index}`} className={`rounded-full px-2.5 py-1 text-xs ${style}`}>{value}</span>) : <span className="text-xs text-[#89958f]">{empty}</span>}</div>; }

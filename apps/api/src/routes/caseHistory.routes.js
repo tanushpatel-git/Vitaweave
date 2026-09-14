@@ -28,7 +28,7 @@ router.get("/patients/search", requireAuth, asyncHandler(searchPatients));
 
 // Patient profile & emergency dataset
 router.get("/patients/:id/profile", requireAuth, asyncHandler(getPatientProfile));
-router.get("/patients/:id/clinical-summary", requireAuth, requireRole("DOCTOR"), asyncHandler(getPatientClinicalSummary));
+router.get("/patients/:id/clinical-summary", requireAuth, requireRole("DOCTOR", "HOD"), asyncHandler(getPatientClinicalSummary));
 router.get("/patients/:id/timeline", requireAuth, asyncHandler(getPatientTimeline));
 router.get("/patients/:id/emergency", requireAuth, asyncHandler(getEmergencyDataset));
 

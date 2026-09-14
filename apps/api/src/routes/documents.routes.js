@@ -41,16 +41,16 @@ function uploadErrorHandler(err, _req, res, next) {
   return res.status(400).json({ error: `Upload failed: ${err.message}` });
 }
 
-router.get("/", requireAuth, requireRole("DOCTOR"), asyncHandler(listMyDocuments));
+router.get("/", requireAuth, requireRole("DOCTOR", "HOD"), asyncHandler(listMyDocuments));
 router.post(
   "/",
   requireAuth,
-  requireRole("DOCTOR"),
+  requireRole("DOCTOR", "HOD"),
   upload.single("file"),
   uploadErrorHandler,
   validateDocumentType,
   asyncHandler(uploadDocument)
 );
-router.delete("/:id", requireAuth, requireRole("DOCTOR"), asyncHandler(deleteDocument));
+router.delete("/:id", requireAuth, requireRole("DOCTOR", "HOD"), asyncHandler(deleteDocument));
 
 module.exports = router;

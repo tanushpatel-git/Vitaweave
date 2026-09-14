@@ -2,15 +2,95 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001";
 
+// Files referenced by the API (e.g. uploaded report images) live on the API
+// server, not the Next.js origin. Prefix with the API base URL so links open
+// the actual file (https://.../uploads/reports/...) instead of a 404.
+export function apiFileUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${API_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+export type Role = "TOP_ADMIN" | "HOSPITAL_ADMIN" | "HOD" | "DOCTOR" | "STAFF" | "PATIENT";
+
 export interface AuthUser {
   id: string;
   email: string;
-  role: "ADMIN" | "DOCTOR" | "PATIENT" | "HOSPITAL";
+  role: Role;
   full_name: string;
   doctor_id?: string;
   patient_id?: string;
   hospital_id?: string;
+  department_id?: string;
 }
+
+export interface Department {
+  id: string;
+  hospital_id: string;
+  name: string;
+  code: string | null;
+  description: string | null;
+  is_active: boolean;
+  hod_id: string | null;
+  hod_name: string | null;
+  doctor_count: number;
+}
+
+export interface ManagedDoctor {
+  id: string;
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  role: string | null;
+  hospital_id: string;
+  department_id: string | null;
+  specialty: string | null;
+  license_no: string | null;
+  is_hod: boolean;
+}
+
+export interface StaffMember {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export type AnswerType = "text" | "number" | "date" | "yes_no" | "multiple_choice" | "multiple_select" | "voice" | "text_voice";
+
+export interface QuestionnaireQuestion {
+  id: string;
+  text: string;
+  text_hi?: string | null;
+  answer_type: AnswerType;
+  required: boolean;
+  options: string[];
+  show_if_question: string | null;
+  show_if_value: string | null;
+  visit_type?: "all" | "first_visit" | "follow_up";
+  order: number;
+}
+
+export interface DepartmentQuestionnaire {
+  id: string | null;
+  department_id: string;
+  title: string | null;
+  description: string | null;
+  version: number;
+  languages: string[];
+  is_active: boolean;
+  questions: QuestionnaireQuestion[];
+}
+
+export type SaveQuestionnairePayload = {
+  title?: string | null;
+  description?: string | null;
+  is_active?: boolean;
+  languages?: string[];
+  questions?: Array<Omit<QuestionnaireQuestion, "id"> & { id?: string }>;
+};
 
 export class ApiError extends Error {
   status: number;
@@ -74,6 +154,7 @@ async function request<T>(
     }
     throw new ApiError(res.status, message);
   }
+  if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -118,9 +199,37 @@ export interface PatientConversationSummary {
   clinical_note: string;
 }
 
+export interface PatientSummaryAppointment {
+  _id: string;
+  scheduled_for: string;
+  department: string;
+  department_id: string | null;
+  status: "requested" | "confirmed" | "completed" | "cancelled";
+  doctor: { id: string; full_name: string } | null;
+  screening: PreConsultationDetail | null;
+}
+
+export interface PatientDocumentInsight {
+  id: string;
+  title: string;
+  type: string;
+  date: string;
+  file_url: string | null;
+  uploaded_by: { id: string; full_name: string | null; role: string | null } | null;
+  ai_status: "pending" | "processing" | "completed" | "failed" | "skipped";
+  ai_classified_type: string | null;
+  ai_summary: string | null;
+  ai_findings: AiFinding[];
+  flagged_findings: string[];
+  extracted_points: string[];
+  ai_extracted_at: string | null;
+  ai_error: string | null;
+}
+
 export interface PatientClinicalSummary {
   patient: { id: string; full_name: string; custom_id: string; dob: string | null; sex: string | null; blood_type: string | null };
   consultation_count: number;
+  appointment_count: number;
   report_count: number;
   latest_activity?: string;
   current_assessment: string;
@@ -131,8 +240,10 @@ export interface PatientClinicalSummary {
   chronic_conditions: string[];
   active_medications: Array<{ name: string; dosage: string; duration?: string | null }>;
   recent_reports: Array<{ title: string; type: string; date: string }>;
-  prescription_insights: Array<{ title: string; date: string; points: string[]; source: string; status: "completed" | "needs_review" | "failed" | "pending" }>;
+prescription_insights: Array<{ title: string; date: string; points: string[]; source: string; status: "completed" | "needs_review" | "failed" | "pending" }>;
   report_insights: Array<{ title: string; type: string; date: string; points: string[]; status: "completed" | "needs_review" | "failed" | "pending" }>;
+  appointments: PatientSummaryAppointment[];
+  document_insights: PatientDocumentInsight[];
   clinical_note: string;
 }
 
@@ -205,6 +316,49 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }, false),
 
+  // ----- Platform admin (TOP_ADMIN) -----
+  adminListHospitals: () => request<{ hospitals: PlatformHospital[] }>("/api/admin/hospitals"),
+  adminCreateHospital: (payload: {
+    name: string; code?: string; hospitalType?: string; registrationNumber?: string; phone?: string;
+    administratorName: string; adminEmail: string; adminPassword: string;
+    address?: string; city?: string; state?: string; pincode?: string; latitude?: number; longitude?: number;
+    totalBeds?: number; icuBeds?: number; activeDoctors?: number;
+  }) => request<{ hospital: PlatformHospital; admin: { id: string; email: string; role: string; full_name: string } }>("/api/admin/hospitals", { method: "POST", body: JSON.stringify(payload) }),
+  adminUpdateHospital: (id: string, payload: Partial<PlatformHospital>) =>
+    request<{ hospital: PlatformHospital }>(`/api/admin/hospitals/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  adminListUsers: (q?: string, role?: Role) =>
+    request<{ users: Array<{ id: string; email: string; role: Role; full_name: string; is_active: boolean; hospital_id: string | null; department_id: string | null; created_at: string }> }>(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}${role ? `${q ? "&" : "?"}role=${role}` : ""}`),
+  adminSetUserActive: (id: string, active: boolean) =>
+    request<{ ok: boolean }>(`/api/admin/users/${id}/active`, { method: "PATCH", body: JSON.stringify({ active }) }),
+
+  // ----- Hospital workspace (HOSPITAL_ADMIN / HOD / STAFF) -----
+  getMyHospital: () => request<{ hospital: PlatformHospital }>("/api/hospitals/me"),
+  updateMyHospital: (payload: Partial<PlatformHospital>) =>
+    request<{ hospital: PlatformHospital }>("/api/hospitals/me", { method: "PATCH", body: JSON.stringify(payload) }),
+  listMyDepartments: () => request<{ departments: Department[] }>("/api/hospitals/departments"),
+  createDepartment: (payload: { name: string; code?: string; description?: string }) =>
+    request<{ department: Department }>("/api/hospitals/departments", { method: "POST", body: JSON.stringify(payload) }),
+  updateDepartment: (id: string, payload: { name?: string; code?: string; description?: string; hod_id?: string | null; is_active?: boolean }) =>
+    request<{ department: Department }>(`/api/hospitals/departments/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteDepartment: (id: string) =>
+    request<{ ok: boolean }>(`/api/hospitals/departments/${id}`, { method: "DELETE" }),
+  getDepartmentQuestionnaire: (id: string) =>
+    request<{ questionnaire: DepartmentQuestionnaire }>(`/api/hospitals/departments/${id}/questionnaire`),
+  saveDepartmentQuestionnaire: (id: string, payload: SaveQuestionnairePayload) =>
+    request<{ questionnaire: DepartmentQuestionnaire }>(`/api/hospitals/departments/${id}/questionnaire`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  listMyDoctors: () => request<{ doctors: ManagedDoctor[] }>("/api/hospitals/doctors"),
+  createDoctor: (payload: { email: string; password: string; fullName: string; specialty?: string; licenseNo?: string; department_id?: string }) =>
+    request<{ doctor: ManagedDoctor }>("/api/hospitals/doctors", { method: "POST", body: JSON.stringify(payload) }),
+  updateDoctor: (id: string, payload: { department_id?: string | null; specialty?: string; license_no?: string; is_active?: boolean }) =>
+    request<{ doctor: ManagedDoctor }>(`/api/hospitals/doctors/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  listMyStaff: () => request<{ staff: StaffMember[] }>("/api/hospitals/staff"),
+  createStaff: (payload: { email: string; password: string; fullName: string; role?: string }) =>
+    request<{ staff: StaffMember }>("/api/hospitals/staff", { method: "POST", body: JSON.stringify(payload) }),
+  listMyPatients: () => request<{ patients: PatientProfile[] }>("/api/hospitals/patients"),
+
   me: () => request<{ user: AuthUser }>("/api/auth/me"),
 
   updateMyPatientProfile: (payload: {
@@ -235,11 +389,11 @@ export const api = {
     return request<{ report: Record<string, unknown> }>(`/api/appointments/hospital/patient/${encodeURIComponent(patientId)}/report`, { method: "POST", body });
   },
 
-  getAppointmentOptions: () => request<{ hospitals: AppointmentHospital[]; doctors: AppointmentDoctor[] }>("/api/appointments/options"),
+  getAppointmentOptions: () => request<{ hospitals: AppointmentHospital[]; departments: AppointmentDepartment[]; doctors: AppointmentDoctor[] }>("/api/appointments/options"),
 
   getMyAppointments: () => request<{ appointments: HospitalAppointment[] }>("/api/appointments/mine"),
 
-  updateMyAppointment: (id: string, payload: { action: "cancel" | "reschedule"; scheduled_for?: string; department?: string; reason?: string; doctor_id?: string }) =>
+  updateMyAppointment: (id: string, payload: { action: "cancel" | "reschedule"; scheduled_for?: string; department?: string; department_id?: string; reason?: string; doctor_id?: string }) =>
     request<{ appointment: HospitalAppointment }>(`/api/appointments/mine/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
 
   getHospitalAppointments: () => request<{ appointments: HospitalAppointment[] }>("/api/appointments/hospital"),
@@ -247,10 +401,44 @@ export const api = {
   updateHospitalAppointment: (id: string, status: "confirmed" | "completed" | "cancelled") =>
     request<{ appointment: HospitalAppointment }>(`/api/appointments/hospital/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status }) }),
 
-  createAppointment: (payload: { scheduled_for: string; department?: string; reason?: string; hospital_id?: string; doctor_id?: string }) =>
+  getAppointmentScreening: (id: string) =>
+    request<{ appointment: { _id: string; patient_name: string; department: string; scheduled_for: string; status: string }; screening: PreConsultationDetail | null }>(`/api/appointments/hospital/${encodeURIComponent(id)}/screening`),
+
+  correctScreeningAnswer: (id: string, payload: { question_id: string; new_value: string | number | string[]; reason?: string }) =>
+    request<{ corrected: ScreeningAnswer }>(`/api/appointments/hospital/${encodeURIComponent(id)}/screening/correct`, { method: "POST", body: JSON.stringify(payload) }),
+
+  createAppointment: (payload: { scheduled_for: string; department?: string; department_id?: string; reason?: string; hospital_id?: string; doctor_id?: string }) =>
     request<{ appointment: HospitalAppointment }>("/api/appointments", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  getAppointmentQuestionnaire: (id: string) =>
+    request<{ appointment: HospitalAppointment; questionnaire: AppointmentQuestionnaire | null; questions: ScreeningQuestion[]; screening: ScreeningSubmission | null }>(`/api/appointments/mine/${encodeURIComponent(id)}/questionnaire`),
+
+  submitAppointmentScreening: (id: string, answers: Array<{ question_id: string; value: string | number | string[] }>) =>
+    request<{ submission: ScreeningSubmission }>(`/api/appointments/mine/${encodeURIComponent(id)}/questionnaire/answers`, { method: "POST", body: JSON.stringify({ answers }) }),
+
+  transcribeAppointmentScreeningAudio: (id: string, audioBlob: Blob, language = "en-IN") => {
+    const body = new FormData();
+    body.append("file", audioBlob, "screening_audio.webm");
+    body.append("language", language);
+    return request<{ transcript: string; status: string; source?: string }>(`/api/appointments/mine/${encodeURIComponent(id)}/transcribe`, { method: "POST", body });
+  },
+
+  startScreeningConversation: (id: string) =>
+    request<{ session: ScreeningSession }>(`/api/appointments/mine/${encodeURIComponent(id)}/screening/start`),
+
+  sendScreeningMessage: (id: string, payload: { question_id: string; answer: string }) =>
+    request<ScreeningMessageResponse>(`/api/appointments/mine/${encodeURIComponent(id)}/screening/message`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  finalizeScreeningConversation: (id: string) =>
+    request<ScreeningMessageResponse>(`/api/appointments/mine/${encodeURIComponent(id)}/screening/message`, {
+      method: "POST",
+      body: JSON.stringify({ question_id: "", answer: "", finalize: true }),
     }),
 
   uploadMyPrescription: (file: File, title: string, summary?: string) => {
@@ -276,6 +464,9 @@ export const api = {
 
   getPatientClinicalSummary: (patientId: string) =>
     request<{ summary: PatientClinicalSummary }>(`/api/case-history/patients/${patientId}/clinical-summary`),
+
+  getPatientHealthJourney: (patientId: string, refresh = false) =>
+    request<PatientHealthJourney>(`/api/medical-documents/patient/${patientId}/health-journey${refresh ? "?refresh=1" : ""}`),
 
   createConversation: (doctorId: string, title?: string) =>
     request<{ conversation: Conversation }>("/api/conversations", {
@@ -443,6 +634,45 @@ export const api = {
       }
     );
   },
+
+  // ----- AI Medical Document System (hospital upload → AI extract → doctor view) -----
+  uploadMedicalReport: (patientId: string, file: File, payload: { title: string; type?: MedicalReportType; summary?: string; date?: string }) => {
+    const body = new FormData();
+    body.append("file", file);
+    body.append("title", payload.title);
+    body.append("type", payload.type || "General");
+    if (payload.summary) body.append("summary", payload.summary);
+    if (payload.date) body.append("date", payload.date);
+    return request<{ report: MedicalReport }>(
+      `/api/medical-documents/patient/${encodeURIComponent(patientId)}/upload`,
+      { method: "POST", body }
+    );
+  },
+
+  getPatientMedicalReports: (patientId: string) =>
+    request<{ patient: MedicalDocumentPatient; reports: MedicalReport[] }>(
+      `/api/medical-documents/patient/${encodeURIComponent(patientId)}`
+    ),
+
+  getDoctorPatientOverview: (patientId: string) =>
+    request<MedicalDocumentOverview>(
+      `/api/medical-documents/patient/${encodeURIComponent(patientId)}/overview`
+    ),
+
+  getMedicalReport: (id: string) =>
+    request<{ report: MedicalReport }>(`/api/medical-documents/${id}`),
+
+  reprocessMedicalReport: (id: string) =>
+    request<{ report: MedicalReport }>(`/api/medical-documents/${id}/reprocess`, { method: "POST" }),
+
+  updateMedicalReport: (id: string, payload: Partial<MedicalReport>) =>
+    request<{ report: MedicalReport }>(`/api/medical-documents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteMedicalReport: (id: string) =>
+    request<void>(`/api/medical-documents/${id}`, { method: "DELETE" }),
 };
 
 export interface PatientProfile {
@@ -469,15 +699,201 @@ export interface HospitalAppointment {
   _id: string;
   scheduled_for: string;
   department: string;
+  department_id: string | null;
   reason: string | null;
   status: "requested" | "confirmed" | "completed" | "cancelled";
   hospital?: AppointmentHospital | null;
   doctor?: AppointmentDoctor | null;
   patient?: { id: string; custom_id: string; full_name: string } | null;
+  pre_consultation?: { completed: boolean; answer_count: number; version: number };
+}
+
+export interface PreConsultationDetail {
+  completed: boolean;
+  version: number;
+  visit_number?: number | null;
+  summary?: PreConsultationSummary | null;
+  answers: ScreeningAnswer[];
+  conversation?: ScreeningConversationEntry[];
+  follow_ups?: ScreeningFollowUp[];
+  facts?: ScreeningFact[];
+  plan?: Array<{ type: string; rule?: string | null; question_id: string; question_text: string; created_at?: string }>;
+  corrections?: Array<{
+    question_id: string;
+    question_text: string;
+    ai_value: string | number | string[];
+    doctor_value: string | number | string[];
+    reason: string | null;
+    by_name: string | null;
+    at: string;
+  }>;
+}
+
+export interface PreConsultationSummary {
+  narrative: string | null;
+  sections?: Record<string, string> | null;
+  source?: string;
 }
 
 export interface AppointmentHospital { id: string; name: string; location?: string; }
-export interface AppointmentDoctor { id: string; full_name: string; specialty: string | null; }
+export interface AppointmentDepartment { id: string; hospital_id: string; name: string; }
+export interface AppointmentDoctor { id: string; full_name: string; specialty: string | null; department_id?: string | null; hospital_id?: string | null; }
+
+export interface AppointmentQuestionnaire {
+  id: string | null;
+  department_id: string | null;
+  title: string | null;
+  description: string | null;
+  version: number;
+  languages: string[];
+}
+
+export type ScreeningQuestion = QuestionnaireQuestion;
+
+export interface ScreeningAnswer {
+  question_id: string;
+  question_text: string;
+  answer_type: AnswerType;
+  category?: string;
+  value: string | number | string[] | null;
+  value_original?: string | number | string[] | null;
+  translated?: boolean;
+  language?: string | null;
+  confidence?: string;
+  skipped?: boolean;
+  not_known?: boolean;
+  corrected?: boolean;
+  correction?: ScreeningCorrection | null;
+  fact_status?: string;
+  detected?: Record<string, unknown> | null;
+}
+
+export interface ScreeningCorrection {
+  value: string | number | string[];
+  original_value?: string | number | string[];
+  reason?: string | null;
+  by_user_id?: string | null;
+  by_name?: string | null;
+  at?: string | null;
+}
+
+export interface ScreeningConversationEntry {
+  role: "ai" | "patient";
+  question_id?: string;
+  text?: string;
+  hi?: string;
+  language?: string;
+  clarification?: boolean;
+  correction?: boolean;
+  follow_up?: boolean;
+  rule?: string | null;
+  previous_value?: string | number | string[] | null;
+  ts?: string;
+}
+
+export interface ScreeningFact {
+  key: string;
+  fact: string;
+  value: string | number | boolean;
+  question_id?: string | null;
+  source: "patient" | "doctor";
+  visit_id: string;
+  recorded_at: string;
+  status: "current" | "superseded" | "corrected";
+  confidence?: string;
+}
+
+export interface ScreeningFollowUp {
+  _id: string;
+  text: string;
+  text_hi: string | null;
+  answer_type: AnswerType;
+  category: string;
+  order: number;
+  _meta?: { rule?: string; step?: number };
+}
+
+export interface ScreeningSubmission {
+  appointment_id: string;
+  status: "draft" | "completed";
+  version: number;
+  answers: ScreeningAnswer[];
+}
+
+export interface BilingualText {
+  en: string;
+  hi: string;
+}
+
+export interface ScreeningConversationSummary {
+  narrative: string | null;
+  sections?: Record<string, string> | null;
+  source?: string;
+}
+
+export interface PhrasedScreeningQuestion extends ScreeningQuestion {
+  phrased?: BilingualText;
+  rule?: string | null;
+}
+
+export interface ScreeningSession {
+  status: "draft" | "completed";
+  visit: { first_visit: boolean; number: number; previous_number?: number | null };
+  greeting: BilingualText;
+  next_question: PhrasedScreeningQuestion | null;
+  answered_questions: string[];
+  total_questions: number;
+  answered_count: number;
+  previous_visit: { number: number; completed_at: string | null; summary: string | null } | null;
+  summary: ScreeningConversationSummary | null;
+  facts?: ScreeningFact[];
+  plan?: Array<{ type: string; rule?: string | null; question_id: string; question_text: string; created_at?: string }>;
+}
+
+export interface ConversationAnswered {
+  question_id: string;
+  question_text: string;
+  answer_type: AnswerType;
+  value: string | number | string[] | null;
+  value_original: string | number | string[] | null;
+  translated: boolean;
+  language?: string | null;
+}
+
+export interface ConversationTurn {
+  status?: string;
+  visit?: { first_visit: boolean; number: number };
+  total_questions?: number;
+  answered_count?: number;
+  answered?: ConversationAnswered | null;
+  clarification?: BilingualText | null;
+  next_question?: PhrasedScreeningQuestion | null;
+  done?: boolean;
+  completion?: BilingualText | null;
+}
+
+export interface ScreeningMessageResponse {
+  turn: ConversationTurn;
+  summary: ScreeningConversationSummary | null;
+}
+
+export interface PlatformHospital {
+  _id?: string;
+  id?: string;
+  code: string;
+  name: string;
+  hospital_type?: string | null;
+  registration_number?: string | null;
+  administrator_name?: string | null;
+  official_email?: string | null;
+  phone?: string | null;
+  location?: Record<string, string | number | null> | null;
+  icu_total_beds?: number;
+  general_total_beds?: number;
+  active_doctors?: number;
+  user_id?: string | null;
+  created_at?: string;
+}
 
 export interface CaseSheet {
   _id?: string;
@@ -562,5 +978,140 @@ export interface CaseSheetExtractionResult {
   follow_up_required: boolean;
   follow_up_notes: string | null;
   extracted_from?: string;
+}
+
+export type MedicalReportType =
+  | "Blood" | "Urine" | "ECG" | "X-Ray" | "MRI" | "CT" | "Pathology"
+  | "Prescription" | "Imaging" | "Discharge" | "General" | "Other";
+
+export const MEDICAL_REPORT_TYPES: MedicalReportType[] = [
+  "Blood", "Urine", "ECG", "X-Ray", "MRI", "CT", "Pathology",
+  "Prescription", "Imaging", "Discharge", "General", "Other",
+];
+
+export interface AiFinding {
+  name: string;
+  value: string | null;
+  unit: string | null;
+  reference_range: string | null;
+  status: string;
+}
+
+export interface MedicalReport {
+  id: string;
+  patient_id: string;
+  type: MedicalReportType;
+  title: string;
+  file_url: string | null;
+  file_mimetype: string | null;
+  date: string;
+  created_at: string;
+  uploaded_by: { id: string; full_name: string | null; role: string | null } | null;
+  summary: string | null;
+  extracted_points: string[];
+  extraction_source: string | null;
+  flagged_findings: string[];
+  ai_status: "pending" | "processing" | "completed" | "failed" | "skipped";
+  ai_classified_type: string | null;
+  ai_summary: string | null;
+  ai_findings: AiFinding[];
+  ai_extracted_at: string | null;
+  ai_error: string | null;
+  disclaimer?: string;
+}
+
+export interface MedicalDocumentPatient {
+  id: string;
+  custom_id: string;
+  abha_id?: string | null;
+  full_name: string;
+  dob: string | null;
+  sex: string | null;
+  blood_type: string | null;
+  contact_phone?: string | null;
+  known_allergies?: string[];
+  chronic_conditions?: string[];
+}
+
+export interface MedicalDocumentOverview {
+  patient: MedicalDocumentPatient;
+  appointments: Array<{
+    _id: string;
+    scheduled_for: string;
+    department: string;
+    status: string;
+    reason: string | null;
+    doctor: { id: string; full_name: string } | null;
+  }>;
+  reports: MedicalReport[];
+  ai_version: string;
+}
+
+export interface JourneyTrendReading {
+  value: number;
+  date: string;
+  report_id: string;
+}
+
+export interface JourneyParameter {
+  key: string;
+  name: string;
+  unit: string | null;
+  flagged: boolean;
+  trend: "up" | "down" | "stable";
+  first_value: number;
+  last_value: number;
+  first_date: string;
+  last_date: string;
+  overall_change_pct: number | null;
+  overall_change_label: string | null;
+  readings: JourneyTrendReading[];
+}
+
+export interface JourneyTimelineItem {
+  report_id: string;
+  title: string;
+  type: string;
+  date: string;
+}
+
+export interface JourneyChangedParameter {
+  key: string;
+  name: string;
+  change_pct: number | null;
+  direction: "up" | "down" | "new";
+  label: string;
+}
+
+export interface PatientHealthJourney {
+  patient: {
+    id: string;
+    custom_id: string;
+    full_name: string;
+    dob: string | null;
+    sex: string | null;
+    blood_type: string | null;
+    age: number | null;
+  };
+  journey: {
+    stats: {
+      reports: number;
+      visits: number;
+      first_report_date: string | null;
+      last_report_date: string | null;
+      tracked_parameters: number;
+    };
+    parameters: JourneyParameter[];
+    timeline: JourneyTimelineItem[];
+    summary: string | null;
+    summary_error: string | null;
+    generated_at: string | null;
+    source_reports: string[];
+  } | null;
+  changed: {
+    since_date: string | null;
+    reports_added: Array<{ report_id: string; title: string; type: string; date: string }>;
+    parameters: JourneyChangedParameter[];
+  };
 }
 

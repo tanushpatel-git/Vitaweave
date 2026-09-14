@@ -21,6 +21,9 @@ dist/
 build/
 *.tsbuildinfo
 
+# --- Uploads ---
+apps/api/uploads/
+
 # --- Env / secrets ---
 .env
 .env.*

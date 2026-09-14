@@ -5,7 +5,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = Router();
 
-router.get("/", requireAuth, requireRole("DOCTOR"), asyncHandler(getMyAiConfig));
-router.put("/", requireAuth, requireRole("DOCTOR"), asyncHandler(upsertMyAiConfig));
+router.get("/", requireAuth, requireRole("DOCTOR", "HOD"), asyncHandler(getMyAiConfig));
+router.put("/", requireAuth, requireRole("DOCTOR", "HOD"), asyncHandler(upsertMyAiConfig));
 
 module.exports = router;

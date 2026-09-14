@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import {
   Activity,
   Brain,
+  ClipboardList,
+  FileSearch,
   FileText,
   MessageSquare,
   Settings,
@@ -12,6 +14,7 @@ import {
   X,
   LogOut,
 } from "lucide-react";
+import { getStoredUser } from "../../../../lib/api";
 
 
 const navigation = [
@@ -24,6 +27,11 @@ const navigation = [
     id: "patient-summary",
     label: "Patient summaries",
     icon: Brain,
+  },
+  {
+    id: "patient-documents",
+    label: "Patient documents",
+    icon: FileSearch,
   },
   {
     id: "conversations",
@@ -56,6 +64,8 @@ export default function DoctorSidebar({
   onSelectTab,
 }: DoctorSidebarProps) {
   const router = useRouter();
+  const user = getStoredUser();
+  const isHod = user?.role === "HOD";
 
   return (
     <aside
@@ -146,6 +156,24 @@ export default function DoctorSidebar({
               </button>
             );
           })}
+
+          {isHod && (
+            <button
+              onClick={() => {
+                router.push("/doctor/questionnaire");
+                onClose();
+              }}
+              className="group flex w-full items-center justify-between rounded-xl px-3 py-3 text-xs transition text-black/50 hover:bg-white hover:text-black"
+            >
+              <span className="flex items-center gap-3">
+                <ClipboardList size={16} strokeWidth={1.8} />
+                Question builder
+              </span>
+              <span className="rounded-full bg-[#e4eeeb] px-2 py-0.5 font-mono text-[8px] uppercase tracking-wide text-[#4c756c]">
+                HOD
+              </span>
+            </button>
+          )}
         </nav>
       </div>
 

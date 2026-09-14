@@ -6,6 +6,7 @@ import DoctorSidebar from "./components/DoctorSidebar";
 import DoctorTopBar from "./components/DoctorTopBar";
 import SmartCaseHistoryView from "./components/SmartCaseHistoryView";
 import PatientClinicalSummaryPage from "./components/PatientClinicalSummary";
+import MedicalDocumentsView from "./components/MedicalDocumentsView";
 import { api, ApiError, type DocumentRow, type Conversation, type Message, type AiConfig } from "../../../lib/api";
 
 const ACCEPTED = ".txt,.md,.csv,.json";
@@ -298,6 +299,8 @@ export default function Page() {
           )}
 
           {activeTab === "patient-summary" && <PatientClinicalSummaryPage />}
+
+          {activeTab === "patient-documents" && <MedicalDocumentsView />}
 
           {/* AI CONFIG SECTION */}
           {activeTab === "ai-config" && (
