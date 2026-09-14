@@ -227,7 +227,7 @@ export interface PatientDocumentInsight {
 }
 
 export interface PatientClinicalSummary {
-  patient: { id: string; full_name: string; custom_id: string; dob: string | null; sex: string | null; blood_type: string | null };
+  patient: { id: string; full_name: string; custom_id: string; email?: string; abha_id?: string | null; dob: string | null; age?: number | null; sex: string | null; blood_type: string | null; contact_phone?: string | null; emergency_contact?: { name?: string | null; phone?: string | null; relation?: string | null } | null };
   consultation_count: number;
   appointment_count: number;
   report_count: number;

@@ -130,6 +130,17 @@ async function searchPatients(req, res) {
   });
 }
 
+function computeAge(dob) {
+  if (!dob) return null;
+  const birth = new Date(dob);
+  if (Number.isNaN(birth.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const months = now.getMonth() - birth.getMonth();
+  if (months < 0 || (months === 0 && now.getDate() < birth.getDate())) age -= 1;
+  return age >= 0 ? age : null;
+}
+
 // 2. Get full patient profile + stats
 async function getPatientProfile(req, res) {
   const { id } = req.params;
@@ -236,7 +247,7 @@ async function getPatientClinicalSummary(req, res) {
 
   res.json({
     summary: {
-      patient: { id: String(patient._id), full_name: patient.user_id?.full_name || "Patient", custom_id: patient.custom_id || `PAT-${String(patient._id).slice(-4).toUpperCase()}`, dob: patient.dob, sex: patient.sex, blood_type: patient.blood_type },
+      patient: { id: String(patient._id), full_name: patient.user_id?.full_name || "Patient", custom_id: patient.custom_id || `PAT-${String(patient._id).slice(-4).toUpperCase()}`, email: patient.user_id?.email || "", abha_id: patient.abha_id || null, dob: patient.dob, age: computeAge(patient.dob), sex: patient.sex, blood_type: patient.blood_type, contact_phone: patient.contact_phone || null, emergency_contact: patient.emergency_contact || null },
       consultation_count: consultations.length,
       appointment_count: appointments.length,
       report_count: reports.length,

@@ -430,13 +430,13 @@ export default function MedicalDocumentsView() {
             <p className="mb-3 text-[9px] font-semibold uppercase tracking-[0.18em] text-[#69736f]">
               Recent appointments at this hospital
             </p>
-            {overview.appointments.length === 0 ? (
+            {overview.appointments.filter((a) => a.status !== "cancelled").length === 0 ? (
               <p className="rounded-xl bg-white p-4 text-xs text-[#929b97]">
                 No appointments recorded.
               </p>
             ) : (
               <div className="space-y-2">
-                {overview.appointments.map((appointment) => (
+                {overview.appointments.filter((a) => a.status !== "cancelled").map((appointment) => (
                   <div
                     key={appointment._id}
                     className="flex flex-wrap items-center gap-3 rounded-xl bg-white px-4 py-3"
