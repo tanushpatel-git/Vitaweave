@@ -727,6 +727,16 @@ export interface PreConsultationDetail {
     by_name: string | null;
     at: string;
   }>;
+  safety_events?: ScreeningSafetyEvent[];
+}
+
+export interface ScreeningSafetyEvent {
+  level: "urgent_review";
+  flags: string[];
+  source: "patient";
+  question_id: string;
+  original_text: string;
+  recorded_at: string;
 }
 
 export interface PreConsultationSummary {
@@ -778,12 +788,13 @@ export interface ScreeningCorrection {
 }
 
 export interface ScreeningConversationEntry {
-  role: "ai" | "patient";
+  role: "ai" | "patient" | "system";
   question_id?: string;
   text?: string;
   hi?: string;
   language?: string;
   clarification?: boolean;
+  safety?: boolean;
   correction?: boolean;
   follow_up?: boolean;
   rule?: string | null;
@@ -870,6 +881,7 @@ export interface ConversationTurn {
   next_question?: PhrasedScreeningQuestion | null;
   done?: boolean;
   completion?: BilingualText | null;
+  safety?: { level: "urgent_review"; flags: string[]; message: BilingualText } | null;
 }
 
 export interface ScreeningMessageResponse {
@@ -1114,4 +1126,3 @@ export interface PatientHealthJourney {
     parameters: JourneyChangedParameter[];
   };
 }
-

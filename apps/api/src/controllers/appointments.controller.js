@@ -206,6 +206,7 @@ async function getAppointmentScreening(req, res) {
           follow_ups: submission.follow_ups || [],
           facts: submission.facts || [],
           corrections: submission.corrections || [],
+          safety_events: submission.safety_events || [],
           plan: submission.conversation_plan || [],
           summary: submission.summary || null,
         }

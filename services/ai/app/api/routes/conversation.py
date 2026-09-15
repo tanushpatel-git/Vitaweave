@@ -31,6 +31,15 @@ from ..deps import verify_ai_key
 router = APIRouter()
 
 DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+# Romanised Hindi is common in appointments and has no script-level signal.
+# Keep this list intentionally conversational rather than trying to identify a
+# patient's region or identity from their speech.
+HINGLISH_RE = re.compile(
+    r"\b(?:mujhe|mera|meri|mein|mein|hai|hain|nahi|nahin|haan|han|"
+    r"pet|dard|bukhar|saans|seene|sar|gale|khansi|chakkar|dawai|medicine|"
+    r"kal|aaj|din|hafte|mahine|phir|dobara|theek|zyada|kam|takleef)\b",
+    re.IGNORECASE,
+)
 
 # Deterministic headline detection so recurrence/improvement are never lost if
 # the model omits them. These are the same bounded rules the Express planner
@@ -115,6 +124,48 @@ UNDERSTAND_SYSTEM = (
     "- Never diagnose, never prescribe, never refuse based on medical "
     "  content. If the patient says something unrelated, summarize it plainly."
 )
+
+TRANSLATION_SYSTEM = (
+    "You are a precise Hindi, Hinglish, and English medical translation "
+    "engine. Translate only what the patient said into natural, plain "
+    "English. Preserve timing, negation, severity, body location, symptom, "
+    "medicine names, and uncertainty exactly. Do not diagnose, explain, "
+    "summarize, add facts, or give advice. Hinglish written in Roman letters "
+    "must be translated too. Return only the English translation, with no "
+    "quotes or labels."
+)
+
+
+def _needs_english_normalization(answer_text: str) -> bool:
+    """Return true for Hindi script or recognisable Roman Hindi/Hinglish."""
+    return bool(DEVANAGARI_RE.search(answer_text) or HINGLISH_RE.search(answer_text))
+
+
+def _translate_patient_words(answer_text: str, question_text: str) -> str | None:
+    """Use a translation-only pass; structured extraction is not translation."""
+    try:
+        translated = get_provider().chat(
+            messages=[
+                {"role": "system", "content": TRANSLATION_SYSTEM},
+                {
+                    "role": "user",
+                    "content": (
+                        f"Screening question for context (do not answer it): {question_text}\n"
+                        f"Patient's exact words:\n{answer_text}"
+                    ),
+                },
+            ],
+            temperature=0.0,
+            max_tokens=300,
+        )
+    except Exception:
+        return None
+    cleaned = (translated or "").strip().strip('"').strip()
+    # A Hindi-script response is not an English translation. Keep the original
+    # rather than replacing it with a bad model response.
+    if not cleaned or DEVANAGARI_RE.search(cleaned):
+        return None
+    return cleaned
 
 PHRASE_SYSTEM = (
     "You are a warm, professional medical screening assistant who talks to "
@@ -229,7 +280,8 @@ async def understand_answer(
             return {"normalized": normalized, "language": "hi" if DEVANAGARI_RE.search(answer_text) else "en",
                     "structured": {}, "needs_clarification": False, "clarification_question": None}
 
-    language_hint = "hi" if DEVANAGARI_RE.search(answer_text) else None
+    needs_translation = _needs_english_normalization(answer_text)
+    language_hint = "hi" if DEVANAGARI_RE.search(answer_text) else ("hinglish" if needs_translation else None)
 
     provider = get_provider()
     user_message = (
@@ -266,6 +318,14 @@ async def understand_answer(
         parsed = {}
 
     normalized = str(parsed.get("normalized") or answer_text or "").strip()
+    # The extraction model is useful for structured fields, but it can echo
+    # Hindi/Hinglish in `normalized`. A separate, deterministic-temperature
+    # translation pass makes the doctor-facing value consistently English
+    # while the raw patient words remain stored separately by Express.
+    if needs_translation:
+        translated = _translate_patient_words(answer_text, question_text)
+        if translated:
+            normalized = translated
     language = str(parsed.get("language") or language_hint or "en").strip()
     structured = _merge_structured(parsed.get("structured"), answer_text)
     needs = bool(parsed.get("needs_clarification"))

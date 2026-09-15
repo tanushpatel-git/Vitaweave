@@ -40,6 +40,31 @@ const SKIP_PATTERN =
 const DONT_KNOW_PATTERN =
   /(?:don['’]?t\s+know|dont\s+know|no\s+idea|nahi\s+(?:pata|maloom|pataa)|pata\s+nahi|pata\s+nhi|maloom\s+nahi|नहीं\s+पता|पता\s+नहीं|मालूम\s+नहीं)/i;
 
+// A deliberately small, explicit safety screen. It prompts the patient to
+// follow the clinic's urgent-care process; it never diagnoses or prescribes.
+const SAFETY_RULES = [
+  { code: "chest_pain", pattern: /(?:chest\s*(?:pain|pressure|tightness)|seene?\s*(?:me[ie]n\s*)?(?:dard|dabaav)|सीने\s*में\s*(?:दर्द|दबाव))/i },
+  { code: "breathing_difficulty", pattern: /(?:difficulty\s*breath|short(?:ness)?\s*of\s*breath|cannot\s*breathe|saans\s*(?:lene\s*)?(?:mein\s*)?(?:takleef|nahi|kam)|सांस\s*(?:लेने\s*)?(?:में\s*)?(?:तकलीफ|नहीं))/i },
+  { code: "severe_bleeding", pattern: /(?:severe\s*bleed|heavy\s*bleed|bleeding\s*(?:a\s*)?lot|bahut\s*(?:zyada\s*)?(?:khoon|bleeding)|बहुत\s*(?:ज़्यादा\s*)?(?:खून|ब्लीडिंग))/i },
+  { code: "stroke_warning", pattern: /(?:face\s*(?:droop|numb)|speech\s*(?:slur|problem)|one\s*side\s*(?:weak|numb)|chehra\s*(?:tedha|sun)|bolne\s*mein\s*problem|ek\s*side\s*(?:kamzor|sun)|चेहरा\s*(?:टेढ़ा|सुन्न)|बोलने\s*में\s*दिक्कत|एक\s*तरफ\s*(?:कमज़ोर|सुन्न))/i },
+  { code: "unconscious_or_seizure", pattern: /(?:unconscious|passed\s*out|faint(?:ed|ing)?|seizure|fit\s*(?:aaya|aya)|behosh|बेहोश|दौरा)/i },
+];
+
+function screenForUrgentSymptoms(rawAnswer) {
+  const text = String(rawAnswer || "").trim();
+  const flags = SAFETY_RULES.filter((rule) => rule.pattern.test(text)).map((rule) => rule.code);
+  if (!flags.length) return null;
+  return {
+    level: "urgent_review",
+    flags,
+    source: "patient",
+    message: {
+      en: "Your response may need prompt medical attention. Please contact the clinic or local emergency service now according to the clinic's emergency process.",
+      hi: "आपके उत्तर पर तुरंत चिकित्सा सहायता की जरूरत हो सकती है। कृपया क्लिनिक की आपातकालीन प्रक्रिया के अनुसार अभी क्लिनिक या स्थानीय आपातकालीन सेवा से संपर्क करें।",
+    },
+  };
+}
+
 function detectMetaCommand(rawAnswer) {
   const text = String(rawAnswer || "").trim();
   if (!text) return { type: "empty" };
@@ -198,7 +223,7 @@ function deterministicSummary(answers, department) {
   return { narrative, sections: null, deterministic: true };
 }
 
-async function finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit }) {
+async function finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit, previous = null }) {
   const answers = (screening.answers || [])
     .filter((a) => !a.skipped && !a.not_known)
     .filter((a) => a.value !== null && a.value !== undefined && a.value !== "")
@@ -208,7 +233,7 @@ async function finalizeSummary({ screening, appointment, patient, visitNumber, f
       value_original: a.value_original ?? null,
       category: a.category || "doctor",
     }));
-  const previousRaw = screening.previous_summary || null;
+  const previousRaw = previous?.summary?.narrative || screening.previous_summary || null;
 
   const data = await aiPost("/api/screening/comprehensive-summary", {
     answers,
@@ -540,7 +565,7 @@ async function startConversation({ appointment, patient, questionnaire }) {
       ts: new Date(),
     });
   } else if (screening.status !== "completed" && answers.length) {
-    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit });
+    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit, previous });
   }
 
   await screening.save();
@@ -594,7 +619,7 @@ async function handleMessage({ appointment, patient, questionnaire, questionId, 
   if (!q) throw Object.assign(new Error("Unknown question"), { status: 400 });
 
   if (finalizeOnly) {
-    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit });
+    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit, previous });
     await screening.save();
     return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, done: true, summary: screening.summary });
   }
@@ -626,6 +651,12 @@ async function handleMessage({ appointment, patient, questionnaire, questionId, 
   const record = answerRecord({ q, normalized, rawAnswer: raw, language, structured, skipped, notKnown });
   record.detected = detected;
   record.confidence = confidence;
+  const safety = skipped || notKnown ? null : screenForUrgentSymptoms(raw);
+  if (safety) {
+    screening.safety_events = screening.safety_events || [];
+    screening.safety_events.push({ ...safety, question_id: questionId, original_text: raw, recorded_at: new Date() });
+    screening.conversation_log.push({ role: "system", question_id: questionId, safety: true, text: safety.message.en, hi: safety.message.hi, flags: safety.flags, ts: new Date() });
+  }
 
   screening.answers = screening.answers || [];
   const existingIndex = screening.answers.findIndex((a) => String(a.question_id) === questionId);
@@ -676,7 +707,7 @@ async function handleMessage({ appointment, patient, questionnaire, questionId, 
       const turn = Object.assign({ id: questionKey(pending) }, questionJson(pending), { phrased });
       screening.conversation_log.push({ role: "ai", question_id: questionKey(pending), follow_up: true, rule: pending._meta && pending._meta.rule, text: phrased.en, hi: phrased.hi, ts: new Date() });
       await screening.save();
-      return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, turn, done: false, total: totalForVisit(questions, firstVisit) + (screening.follow_ups || []).length });
+      return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, turn, done: false, safety, total: totalForVisit(questions, firstVisit) + (screening.follow_ups || []).length });
     }
 
     // 2. Otherwise the next doctor-defined question.
@@ -690,13 +721,13 @@ async function handleMessage({ appointment, patient, questionnaire, questionId, 
       const turn = Object.assign({ id: questionKey(next) }, questionJson(next), { phrased });
       screening.conversation_log.push({ role: "ai", question_id: questionKey(next), text: phrased.en, hi: phrased.hi, ts: new Date() });
       await screening.save();
-      return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, turn, done: false, total: totalForVisit(questions, firstVisit) + (screening.follow_ups || []).length });
+      return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, turn, done: false, safety, total: totalForVisit(questions, firstVisit) + (screening.follow_ups || []).length });
     }
 
     // 3. Done -> finalize.
-    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit });
+    await finalizeSummary({ screening, appointment, patient, visitNumber, firstVisit, previous });
     await screening.save();
-    return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, done: true, summary: screening.summary });
+    return buildTurn({ screening, appointment, patient, questionnaire, firstVisit, visitNumber, q, done: true, summary: screening.summary, safety });
   };
 
   return askNext();
@@ -737,7 +768,7 @@ function detectAnswerContext({ raw, structured, q, previous }) {
   return context;
 }
 
-function buildTurn({ screening, firstVisit, visitNumber, q, clarification, turn, done, summary, total }) {
+function buildTurn({ screening, firstVisit, visitNumber, q, clarification, turn, done, summary, safety, total }) {
   const previous_question = q
     ? {
         question_id: questionKey(q),
@@ -768,6 +799,7 @@ function buildTurn({ screening, firstVisit, visitNumber, q, clarification, turn,
       next_question: turn,
       done: Boolean(done),
       completion,
+      safety: safety || null,
     },
     summary: summary || null,
   };
@@ -789,4 +821,4 @@ function questionJson(q) {
   };
 }
 
-module.exports = { startConversation, handleMessage, getScreening, correctAnswer, detectMetaCommand, questionKey, questionJson, totalForVisit };
+module.exports = { startConversation, handleMessage, getScreening, correctAnswer, detectMetaCommand, screenForUrgentSymptoms, questionKey, questionJson, totalForVisit };

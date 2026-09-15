@@ -121,6 +121,7 @@ function DeepScreeningView({ screening, appointmentId, patientName }: { screenin
   const conversation = (screening.conversation || []) as ScreeningConversationEntry[];
   const followUps = screening.follow_ups || [];
   const corrections = screening.corrections || [];
+  const safetyEvents = screening.safety_events || [];
 
   const startEdit = (answer: ScreeningAnswer) => {
     setEditing(answer.question_id);
@@ -200,6 +201,12 @@ function DeepScreeningView({ screening, appointmentId, patientName }: { screenin
 
       {tab === "summary" && (
         <div className="mt-2 rounded-xl border border-[#e8edeb] bg-white p-3">
+          {safetyEvents.length > 0 && (
+            <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] leading-4 text-amber-900">
+              <p className="flex items-center gap-1 font-semibold"><AlertTriangle size={11} /> Urgent review flag from patient response</p>
+              <p className="mt-0.5">{safetyEvents.map((event) => event.flags.join(", ").replace(/_/g, " ")).join(" · ")}. Follow the clinic&apos;s escalation protocol.</p>
+            </div>
+          )}
           <SummaryView sections={sections} narrative={screening.summary?.narrative} />
         </div>
       )}

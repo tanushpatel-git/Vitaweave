@@ -61,7 +61,9 @@ export default function Page() {
   const [currentQuestion, setCurrentQuestion] = useState<PhrasedScreeningQuestion | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [draft, setDraft] = useState("");
-  const [voiceLanguage, setVoiceLanguage] = useState("hi-IN");
+  const [voiceLanguage, setVoiceLanguage] = useState(() =>
+    typeof navigator !== "undefined" && navigator.language.toLowerCase().startsWith("hi") ? "hi-IN" : "en-IN"
+  );
   const [visitInfo, setVisitInfo] = useState<{ first_visit: boolean; number: number } | null>(null);
   const [previousVisit, setPreviousVisit] = useState<{ number: number; completed_at: string | null; summary: string | null } | null>(null);
   const [progress, setProgress] = useState<{ answered: number; total: number }>({ answered: 0, total: 0 });
@@ -138,6 +140,9 @@ export default function Page() {
       const res = await api.sendScreeningMessage(appointmentId, { question_id: currentQuestion.id, answer: text });
       const turn = res.turn;
       setProgress({ answered: turn.answered_count ?? progress.answered, total: turn.total_questions ?? progress.total });
+      if (turn.safety?.message) {
+        pushMessages([{ id: nextId(), role: "ai", kind: "clarification", en: turn.safety.message.en, hi: turn.safety.message.hi }]);
+      }
       if (turn.clarification) {
         pushMessages([{ id: nextId(), role: "ai", kind: "clarification", en: turn.clarification.en, hi: turn.clarification.hi, question_id: currentQuestion.id }]);
         return;
@@ -224,7 +229,10 @@ export default function Page() {
             {(["en", "hi"] as const).map((lang) => (
               <button
                 key={lang}
-                onClick={() => setLanguage(lang)}
+                onClick={() => {
+                  setLanguage(lang);
+                  setVoiceLanguage(lang === "hi" ? "hi-IN" : "en-IN");
+                }}
                 className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${language === lang ? "bg-[#17221f] text-white" : "text-[#596862] hover:text-[#17221f]"}`}
               >
                 {lang === "en" ? "English" : "हिन्दी"}

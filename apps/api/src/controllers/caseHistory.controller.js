@@ -232,6 +232,7 @@ async function getPatientClinicalSummary(req, res) {
             follow_ups: screening.follow_ups || [],
             facts: screening.facts || [],
             corrections: screening.corrections || [],
+            safety_events: screening.safety_events || [],
             plan: screening.conversation_plan || [],
           }
         : null,

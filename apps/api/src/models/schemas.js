@@ -138,6 +138,8 @@ const preConsultationSchema = new Schema(
     follow_ups: { type: Schema.Types.Mixed, default: [] },
     facts: { type: Schema.Types.Mixed, default: [] },
     corrections: { type: Schema.Types.Mixed, default: [] },
+    // Explicit, clinic-reviewable safety flags. These are not diagnoses.
+    safety_events: { type: Schema.Types.Mixed, default: [] },
     visit_number: { type: Number, default: 1 },
     started_at: { type: Date, default: null },
     completed_at: { type: Date, default: null },
